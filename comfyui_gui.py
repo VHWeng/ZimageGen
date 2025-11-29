@@ -18,14 +18,21 @@ class WorkflowRunner(QThread):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     
-    def __init__(self, prompt_text, server_address="127.0.0.1:8188"):
+    def __init__(self, prompt_text, server_address="127.0.0.1:8188", seed=None):
         super().__init__()
         self.prompt_text = prompt_text
         self.server_address = server_address
         self.workflow = None
+        self.seed = seed
         
     def load_workflow(self):
         """Load and modify the workflow with the new prompt"""
+        import random
+        
+        # Generate random seed if not provided
+        if self.seed is None:
+            self.seed = random.randint(0, 2**32 - 1)
+        
         # Base workflow structure from the JSON
         workflow = {
             "27": {
@@ -78,7 +85,7 @@ class WorkflowRunner(QThread):
             },
             "3": {
                 "inputs": {
-                    "seed": 898303157960251,
+                    "seed": self.seed,
                     "steps": 4,
                     "cfg": 1.0,
                     "sampler_name": "res_multistep",
@@ -220,6 +227,8 @@ class ComfyUIGUI(QMainWindow):
         super().__init__()
         self.current_image_data = None
         self.current_pixmap = None
+        self.current_prompt = ""
+        self.current_seed = None
         self.init_ui()
         
     def init_ui(self):
@@ -274,6 +283,11 @@ Barcode at the bottom corner."""
         self.generate_btn.clicked.connect(self.generate_image)
         button_layout.addWidget(self.generate_btn)
         
+        self.regenerate_btn = QPushButton("Re-Generate (New Seed)")
+        self.regenerate_btn.clicked.connect(self.regenerate_image)
+        self.regenerate_btn.setEnabled(False)
+        button_layout.addWidget(self.regenerate_btn)
+        
         self.save_btn = QPushButton("Save Image (JPG)")
         self.save_btn.clicked.connect(self.save_image)
         self.save_btn.setEnabled(False)
@@ -319,14 +333,32 @@ Barcode at the bottom corner."""
             QMessageBox.warning(self, "No Prompt", "Please enter a prompt first!")
             return
         
-        # Disable generate button during generation
+        # Store current prompt and generate new seed
+        self.current_prompt = prompt
+        self.current_seed = None  # Will generate random seed
+        
+        self._start_generation(prompt, None)
+    
+    def regenerate_image(self):
+        """Regenerate image with same prompt but new seed"""
+        if not self.current_prompt:
+            QMessageBox.warning(self, "No Prompt", "Generate an image first!")
+            return
+        
+        # Use stored prompt with new random seed
+        self._start_generation(self.current_prompt, None)
+    
+    def _start_generation(self, prompt, seed=None):
+        """Internal method to start image generation"""
+        # Disable buttons during generation
         self.generate_btn.setEnabled(False)
+        self.regenerate_btn.setEnabled(False)
         self.save_btn.setEnabled(False)
         
         self.log_status("Starting image generation...")
         
         # Create and start worker thread
-        self.worker = WorkflowRunner(prompt)
+        self.worker = WorkflowRunner(prompt, seed=seed)
         self.worker.status.connect(self.log_status)
         self.worker.error.connect(self.log_error)
         self.worker.finished.connect(self.on_generation_complete)
@@ -342,6 +374,7 @@ Barcode at the bottom corner."""
     def on_generation_complete(self, image_data):
         """Handle completion of image generation"""
         self.generate_btn.setEnabled(True)
+        self.regenerate_btn.setEnabled(True)
         
         if image_data:
             try:
@@ -367,7 +400,12 @@ Barcode at the bottom corner."""
                 self.current_image_data = image_data
                 self.save_btn.setEnabled(True)
                 
-                self.log_status("✓ Image generation completed successfully!")
+                # Store the seed used for this generation
+                if hasattr(self.worker, 'seed'):
+                    self.current_seed = self.worker.seed
+                    self.log_status(f"✓ Image generation completed successfully! (Seed: {self.current_seed})")
+                else:
+                    self.log_status("✓ Image generation completed successfully!")
                 
             except Exception as e:
                 self.log_error(f"Failed to display image: {str(e)}")
