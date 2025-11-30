@@ -3,13 +3,72 @@ import json
 import requests
 import base64
 import io
+import re
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTextEdit, QLabel, 
-                             QScrollArea, QFileDialog, QMessageBox, QComboBox)
+                             QScrollArea, QFileDialog, QMessageBox, QComboBox, 
+                             QLineEdit, QGroupBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap, QImage
 from PIL import Image
+
+
+class OllamaPromptGenerator(QThread):
+    """Thread to generate prompts using Ollama"""
+    finished = pyqtSignal(str)  # Emits generated prompt
+    error = pyqtSignal(str)
+    status = pyqtSignal(str)
+    
+    def __init__(self, phrase, model, ollama_url="http://127.0.0.1:11434"):
+        super().__init__()
+        self.phrase = phrase
+        self.model = model
+        self.ollama_url = ollama_url
+    
+    def run(self):
+        """Generate prompt using Ollama"""
+        try:
+            self.status.emit(f"Generating prompt with {self.model}...")
+            
+            system_prompt = """You are an expert at creating detailed image generation prompts. 
+Given a simple word or phrase, expand it into a detailed, vivid prompt suitable for an AI image generator.
+Include details about: style, composition, lighting, mood, colors, and technical aspects.
+Keep the prompt under 300 words and make it descriptive and creative.
+Only return the image prompt, nothing else."""
+
+            user_prompt = f"Create a detailed image generation prompt based on this concept: {self.phrase}"
+            
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{system_prompt}\n\n{user_prompt}",
+                    "stream": False
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                generated_prompt = result.get('response', '').strip()
+                
+                if generated_prompt:
+                    self.status.emit("✓ Prompt generated successfully!")
+                    self.finished.emit(generated_prompt)
+                else:
+                    self.error.emit("Empty response from Ollama")
+                    self.finished.emit("")
+            else:
+                self.error.emit(f"Ollama error: {response.status_code} - {response.text}")
+                self.finished.emit("")
+                
+        except requests.exceptions.ConnectionError:
+            self.error.emit("Cannot connect to Ollama. Is it running at http://127.0.0.1:11434?")
+            self.finished.emit("")
+        except Exception as e:
+            self.error.emit(f"Error generating prompt: {str(e)}")
+            self.finished.emit("")
 
 
 class WorkflowRunner(QThread):
@@ -231,6 +290,8 @@ class ComfyUIGUI(QMainWindow):
         self.current_pixmap = None
         self.current_prompt = ""
         self.current_seed = None
+        self.current_phrase = ""
+        self.image_counter = {}  # Track counters per phrase
         
         # Image size presets
         self.size_presets = {
@@ -260,7 +321,7 @@ class ComfyUIGUI(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("ComfyUI Z-Image Turbo Generator")
-        self.setGeometry(100, 100, 900, 800)
+        self.setGeometry(100, 100, 900, 900)
         
         # Central widget
         central_widget = QWidget()
@@ -269,6 +330,44 @@ class ComfyUIGUI(QMainWindow):
         # Main layout
         layout = QVBoxLayout()
         central_widget.setLayout(layout)
+        
+        # Prompt Generation Section
+        prompt_gen_group = QGroupBox("AI Prompt Generation (Ollama)")
+        prompt_gen_layout = QVBoxLayout()
+        
+        # Phrase input
+        phrase_layout = QHBoxLayout()
+        phrase_label = QLabel("Concept/Phrase:")
+        phrase_layout.addWidget(phrase_label)
+        
+        self.phrase_input = QLineEdit()
+        self.phrase_input.setPlaceholderText("Enter a word or phrase (e.g., 'sunset over mountains', 'cyberpunk city')...")
+        phrase_layout.addWidget(self.phrase_input)
+        prompt_gen_layout.addLayout(phrase_layout)
+        
+        # Ollama controls
+        ollama_controls_layout = QHBoxLayout()
+        
+        model_label = QLabel("Ollama Model:")
+        ollama_controls_layout.addWidget(model_label)
+        
+        self.ollama_model_combo = QComboBox()
+        self.ollama_model_combo.setMinimumWidth(200)
+        ollama_controls_layout.addWidget(self.ollama_model_combo)
+        
+        self.refresh_models_btn = QPushButton("🔄 Update Models")
+        self.refresh_models_btn.clicked.connect(self.refresh_ollama_models)
+        ollama_controls_layout.addWidget(self.refresh_models_btn)
+        
+        self.generate_prompt_btn = QPushButton("✨ Generate Prompt")
+        self.generate_prompt_btn.clicked.connect(self.generate_prompt_from_phrase)
+        ollama_controls_layout.addWidget(self.generate_prompt_btn)
+        
+        ollama_controls_layout.addStretch()
+        
+        prompt_gen_layout.addLayout(ollama_controls_layout)
+        prompt_gen_group.setLayout(prompt_gen_layout)
+        layout.addWidget(prompt_gen_group)
         
         # Prompt text box
         prompt_label = QLabel("Prompt:")
@@ -384,6 +483,79 @@ Barcode at the bottom corner."""
         
         # Initial status
         self.log_status("Ready. Enter a prompt and click 'Generate Image'.")
+        
+        # Load Ollama models on startup
+        self.refresh_ollama_models()
+    
+    def refresh_ollama_models(self):
+        """Fetch available Ollama models"""
+        try:
+            self.log_status("Fetching Ollama models...")
+            response = requests.get("http://127.0.0.1:11434/api/tags", timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get('models', [])
+                
+                self.ollama_model_combo.clear()
+                
+                if models:
+                    for model in models:
+                        model_name = model.get('name', '')
+                        if model_name:
+                            self.ollama_model_combo.addItem(model_name)
+                    
+                    self.log_status(f"✓ Found {len(models)} Ollama model(s)")
+                else:
+                    self.log_status("⚠ No Ollama models found. Pull models using: ollama pull <model_name>")
+                    self.ollama_model_combo.addItem("(No models available)")
+                    
+            else:
+                self.log_error(f"Failed to fetch Ollama models: {response.status_code}")
+                
+        except requests.exceptions.ConnectionError:
+            self.log_error("Cannot connect to Ollama at http://127.0.0.1:11434. Is it running?")
+            self.ollama_model_combo.clear()
+            self.ollama_model_combo.addItem("(Ollama not running)")
+        except Exception as e:
+            self.log_error(f"Error fetching Ollama models: {str(e)}")
+    
+    def generate_prompt_from_phrase(self):
+        """Generate detailed prompt from phrase using Ollama"""
+        phrase = self.phrase_input.text().strip()
+        
+        if not phrase:
+            QMessageBox.warning(self, "No Phrase", "Please enter a concept or phrase first!")
+            return
+        
+        model = self.ollama_model_combo.currentText()
+        
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please install Ollama models first!\n\nExample: ollama pull llama3.2")
+            return
+        
+        # Store phrase for filename generation
+        self.current_phrase = phrase
+        
+        # Disable button during generation
+        self.generate_prompt_btn.setEnabled(False)
+        
+        # Create and start prompt generator thread
+        self.prompt_generator = OllamaPromptGenerator(phrase, model)
+        self.prompt_generator.status.connect(self.log_status)
+        self.prompt_generator.error.connect(self.log_error)
+        self.prompt_generator.finished.connect(self.on_prompt_generated)
+        self.prompt_generator.start()
+    
+    def on_prompt_generated(self, prompt):
+        """Handle generated prompt from Ollama"""
+        self.generate_prompt_btn.setEnabled(True)
+        
+        if prompt:
+            self.prompt_text.setText(prompt)
+            self.log_status("✓ Prompt inserted into text box. Review and click 'Generate Image'.")
+        else:
+            self.log_error("Failed to generate prompt")
     
     def on_size_changed(self, size_text):
         """Handle size preset selection"""
@@ -554,16 +726,34 @@ Barcode at the bottom corner."""
             self.log_error("Image generation failed. Check error messages above.")
     
     def save_image(self):
-        """Save the generated image as JPG"""
+        """Save the generated image as JPG with auto-naming"""
         if not self.current_image_data:
             QMessageBox.warning(self, "No Image", "No image to save!")
             return
         
-        # Open file dialog
+        # Generate filename
+        if self.current_phrase:
+            # Clean phrase for filename
+            clean_phrase = re.sub(r'[^\w\s-]', '', self.current_phrase)
+            clean_phrase = re.sub(r'[-\s]+', '_', clean_phrase).strip('_')
+            clean_phrase = clean_phrase[:50]  # Limit length
+            
+            # Get or increment counter for this phrase
+            if clean_phrase not in self.image_counter:
+                self.image_counter[clean_phrase] = 1
+            else:
+                self.image_counter[clean_phrase] += 1
+            
+            counter = self.image_counter[clean_phrase]
+            default_filename = f"{clean_phrase}_{counter:04d}.jpg"
+        else:
+            default_filename = "generated_image_0001.jpg"
+        
+        # Open file dialog with auto-generated name
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Image",
-            "generated_image.jpg",
+            default_filename,
             "JPEG Images (*.jpg *.jpeg)"
         )
         
