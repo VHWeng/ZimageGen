@@ -6,7 +6,7 @@ import io
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTextEdit, QLabel, 
-                             QScrollArea, QFileDialog, QMessageBox)
+                             QScrollArea, QFileDialog, QMessageBox, QComboBox)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap, QImage
 from PIL import Image
@@ -18,14 +18,16 @@ class WorkflowRunner(QThread):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     
-    def __init__(self, prompt_text, server_address="127.0.0.1:8188", seed=None):
+    def __init__(self, prompt_text, server_address="127.0.0.1:8188", seed=None, width=512, height=512):
         super().__init__()
         self.prompt_text = prompt_text
         self.server_address = server_address
         self.workflow = None
         self.seed = seed
+        self.width = width
+        self.height = height
         
-    def load_workflow(self):
+    def load_workflow(self, width=512, height=512):
         """Load and modify the workflow with the new prompt"""
         import random
         
@@ -64,8 +66,8 @@ class WorkflowRunner(QThread):
             },
             "13": {
                 "inputs": {
-                    "width": 512,
-                    "height": 512,
+                    "width": width,
+                    "height": height,
                     "batch_size": 1
                 },
                 "class_type": "EmptySD3LatentImage"
@@ -119,7 +121,7 @@ class WorkflowRunner(QThread):
         """Execute the workflow"""
         try:
             self.status.emit("Loading workflow...")
-            workflow = self.load_workflow()
+            workflow = self.load_workflow(self.width, self.height)
             
             self.status.emit("Queuing prompt to ComfyUI...")
             prompt_data = {"prompt": workflow}
@@ -229,6 +231,31 @@ class ComfyUIGUI(QMainWindow):
         self.current_pixmap = None
         self.current_prompt = ""
         self.current_seed = None
+        
+        # Image size presets
+        self.size_presets = {
+            "512x512 (Square)": (512, 512),
+            "768x768 (Square)": (768, 768),
+            "1024x1024 (Square)": (1024, 1024),
+            "512x768 (Portrait)": (512, 768),
+            "768x1024 (Portrait)": (768, 1024),
+            "768x512 (Landscape)": (768, 512),
+            "1024x768 (Landscape)": (1024, 768),
+            "1024x576 (16:9)": (1024, 576),
+            "576x1024 (9:16)": (576, 1024),
+        }
+        
+        # Aspect ratio presets
+        self.aspect_ratios = {
+            "1:1 (Square)": (1, 1),
+            "4:3": (4, 3),
+            "3:4": (3, 4),
+            "16:9 (Widescreen)": (16, 9),
+            "9:16 (Portrait)": (9, 16),
+            "3:2": (3, 2),
+            "2:3": (2, 3),
+        }
+        
         self.init_ui()
         
     def init_ui(self):
@@ -258,6 +285,52 @@ Small cover text: "Youth & Freedom", "Tokyo Street Issue", "Vol. 24 | August 202
 Barcode at the bottom corner."""
         self.prompt_text.setText(default_prompt)
         layout.addWidget(self.prompt_text)
+        
+        # Image size and aspect ratio controls
+        size_controls_layout = QHBoxLayout()
+        
+        # Size preset dropdown
+        size_label = QLabel("Image Size:")
+        size_controls_layout.addWidget(size_label)
+        
+        self.size_combo = QComboBox()
+        self.size_combo.addItems(self.size_presets.keys())
+        self.size_combo.setCurrentText("512x512 (Square)")
+        self.size_combo.currentTextChanged.connect(self.on_size_changed)
+        size_controls_layout.addWidget(self.size_combo)
+        
+        size_controls_layout.addSpacing(20)
+        
+        # Aspect ratio dropdown
+        aspect_label = QLabel("Aspect Ratio:")
+        size_controls_layout.addWidget(aspect_label)
+        
+        self.aspect_combo = QComboBox()
+        self.aspect_combo.addItems(self.aspect_ratios.keys())
+        self.aspect_combo.setCurrentText("1:1 (Square)")
+        self.aspect_combo.currentTextChanged.connect(self.on_aspect_changed)
+        size_controls_layout.addWidget(self.aspect_combo)
+        
+        size_controls_layout.addSpacing(20)
+        
+        # Base size input for aspect ratio calculation
+        base_size_label = QLabel("Base Size:")
+        size_controls_layout.addWidget(base_size_label)
+        
+        self.base_size_combo = QComboBox()
+        self.base_size_combo.addItems(["512", "768", "1024"])
+        self.base_size_combo.setCurrentText("512")
+        self.base_size_combo.currentTextChanged.connect(self.on_aspect_changed)
+        size_controls_layout.addWidget(self.base_size_combo)
+        
+        size_controls_layout.addStretch()
+        
+        layout.addLayout(size_controls_layout)
+        
+        # Current dimensions display
+        self.dimensions_label = QLabel("Current: 512 x 512")
+        self.dimensions_label.setStyleSheet("QLabel { color: #0066cc; font-weight: bold; }")
+        layout.addWidget(self.dimensions_label)
         
         # Image preview area
         preview_label = QLabel("Generated Image:")
@@ -312,6 +385,68 @@ Barcode at the bottom corner."""
         # Initial status
         self.log_status("Ready. Enter a prompt and click 'Generate Image'.")
     
+    def on_size_changed(self, size_text):
+        """Handle size preset selection"""
+        if size_text in self.size_presets:
+            width, height = self.size_presets[size_text]
+            self.dimensions_label.setText(f"Current: {width} x {height}")
+            
+            # Disable aspect ratio controls when using presets
+            self.aspect_combo.setEnabled(False)
+            self.base_size_combo.setEnabled(False)
+    
+    def on_aspect_changed(self):
+        """Handle aspect ratio selection"""
+        aspect_text = self.aspect_combo.currentText()
+        base_size = int(self.base_size_combo.currentText())
+        
+        if aspect_text in self.aspect_ratios:
+            ratio_w, ratio_h = self.aspect_ratios[aspect_text]
+            
+            # Calculate dimensions based on aspect ratio
+            if ratio_w >= ratio_h:
+                width = base_size
+                height = int(base_size * ratio_h / ratio_w)
+            else:
+                height = base_size
+                width = int(base_size * ratio_w / ratio_h)
+            
+            # Round to nearest multiple of 8 (common requirement for diffusion models)
+            width = (width // 8) * 8
+            height = (height // 8) * 8
+            
+            self.dimensions_label.setText(f"Current: {width} x {height}")
+            
+            # Enable aspect ratio controls
+            self.aspect_combo.setEnabled(True)
+            self.base_size_combo.setEnabled(True)
+            
+            # Update size combo to show it's custom
+            self.size_combo.blockSignals(True)
+            self.size_combo.setCurrentIndex(-1)
+            self.size_combo.blockSignals(False)
+    
+    def get_current_dimensions(self):
+        """Get the currently selected image dimensions"""
+        size_text = self.size_combo.currentText()
+        
+        if size_text in self.size_presets:
+            return self.size_presets[size_text]
+        else:
+            # Parse from dimensions label
+            dims_text = self.dimensions_label.text()
+            parts = dims_text.replace("Current:", "").strip().split("x")
+            if len(parts) == 2:
+                try:
+                    width = int(parts[0].strip())
+                    height = int(parts[1].strip())
+                    return (width, height)
+                except ValueError:
+                    pass
+            
+            # Default fallback
+            return (512, 512)
+    
     def log_status(self, message):
         """Add a status message to the status box"""
         self.status_box.append(f"[{self.get_timestamp()}] {message}")
@@ -337,7 +472,10 @@ Barcode at the bottom corner."""
         self.current_prompt = prompt
         self.current_seed = None  # Will generate random seed
         
-        self._start_generation(prompt, None)
+        # Get current dimensions
+        width, height = self.get_current_dimensions()
+        
+        self._start_generation(prompt, None, width, height)
     
     def regenerate_image(self):
         """Regenerate image with same prompt but new seed"""
@@ -345,20 +483,23 @@ Barcode at the bottom corner."""
             QMessageBox.warning(self, "No Prompt", "Generate an image first!")
             return
         
+        # Get current dimensions
+        width, height = self.get_current_dimensions()
+        
         # Use stored prompt with new random seed
-        self._start_generation(self.current_prompt, None)
+        self._start_generation(self.current_prompt, None, width, height)
     
-    def _start_generation(self, prompt, seed=None):
+    def _start_generation(self, prompt, seed=None, width=512, height=512):
         """Internal method to start image generation"""
         # Disable buttons during generation
         self.generate_btn.setEnabled(False)
         self.regenerate_btn.setEnabled(False)
         self.save_btn.setEnabled(False)
         
-        self.log_status("Starting image generation...")
+        self.log_status(f"Starting image generation ({width}x{height})...")
         
         # Create and start worker thread
-        self.worker = WorkflowRunner(prompt, seed=seed)
+        self.worker = WorkflowRunner(prompt, seed=seed, width=width, height=height)
         self.worker.status.connect(self.log_status)
         self.worker.error.connect(self.log_error)
         self.worker.finished.connect(self.on_generation_complete)
