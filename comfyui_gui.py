@@ -174,6 +174,7 @@ class BatchModeDialog(QDialog):
         self.batch_data = []
         self.image_data = {}  # Store generated images by row index
         self.current_selected_row = -1
+        self.active_workers = []  # Track active worker threads
         self.init_ui()
     
     def init_ui(self):
@@ -463,10 +464,15 @@ class BatchModeDialog(QDialog):
         self.log_status(f"Regenerating prompt for row {row + 1}...")
         
         # Use single prompt generator
-        self.single_prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model)
-        self.single_prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
-        self.single_prompt_gen.error.connect(self.log_error)
-        self.single_prompt_gen.start()
+        prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model)
+        prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
+        prompt_gen.error.connect(self.log_error)
+        
+        # Keep reference to prevent garbage collection
+        self.active_workers.append(prompt_gen)
+        prompt_gen.finished.connect(lambda: self.cleanup_worker(prompt_gen))
+        
+        prompt_gen.start()
     
     def on_single_prompt_generated(self, row, prompt):
         """Handle single prompt generation"""
@@ -489,10 +495,14 @@ class BatchModeDialog(QDialog):
         width, height = self.parent_window.get_current_dimensions()
         
         # Generate single image
-        self.single_img_row = row
         worker = WorkflowRunner(prompt, width=width, height=height)
-        worker.finished.connect(lambda img: self.on_single_image_generated(self.single_img_row, img))
+        worker.finished.connect(lambda img, r=row: self.on_single_image_generated(r, img))
         worker.error.connect(self.log_error)
+        
+        # Keep reference to prevent garbage collection
+        self.active_workers.append(worker)
+        worker.finished.connect(lambda: self.cleanup_worker(worker))
+        
         worker.start()
     
     def on_single_image_generated(self, row, image_data):
@@ -504,6 +514,36 @@ class BatchModeDialog(QDialog):
             # Update preview if this row is selected
             if self.current_selected_row == row:
                 self.display_preview_image(image_data)
+    
+    def cleanup_worker(self, worker):
+        """Remove worker from active list after completion"""
+        try:
+            if worker in self.active_workers:
+                self.active_workers.remove(worker)
+            # Wait for thread to finish properly
+            if worker.isRunning():
+                worker.wait(1000)  # Wait up to 1 second
+        except Exception as e:
+            pass  # Ignore cleanup errors
+    
+    def closeEvent(self, event):
+        """Clean up threads when dialog closes"""
+        # Wait for all active workers to finish
+        for worker in self.active_workers:
+            if worker.isRunning():
+                worker.quit()
+                worker.wait(2000)  # Wait up to 2 seconds
+        
+        # Clean up batch workers if running
+        if hasattr(self, 'batch_prompt_gen') and self.batch_prompt_gen.isRunning():
+            self.batch_prompt_gen.quit()
+            self.batch_prompt_gen.wait(2000)
+        
+        if hasattr(self, 'batch_img_gen') and self.batch_img_gen.isRunning():
+            self.batch_img_gen.quit()
+            self.batch_img_gen.wait(2000)
+        
+        event.accept()
     
     def process_batch(self):
         """Process entire batch to generate all images"""
@@ -942,6 +982,7 @@ class ComfyUIGUI(QMainWindow):
         self.current_seed = None
         self.current_phrase = ""
         self.image_counter = {}  # Track counters per phrase
+        self.active_worker = None  # Track active worker thread
         
         # Image size presets
         self.size_presets = {
@@ -1194,6 +1235,11 @@ Barcode at the bottom corner."""
         # Disable button during generation
         self.generate_prompt_btn.setEnabled(False)
         
+        # Clean up previous prompt generator if exists
+        if hasattr(self, 'prompt_generator') and self.prompt_generator.isRunning():
+            self.prompt_generator.quit()
+            self.prompt_generator.wait(1000)
+        
         # Create and start prompt generator thread
         self.prompt_generator = OllamaPromptGenerator(phrase, model)
         self.prompt_generator.status.connect(self.log_status)
@@ -1317,6 +1363,11 @@ Barcode at the bottom corner."""
     
     def _start_generation(self, prompt, seed=None, width=512, height=512):
         """Internal method to start image generation"""
+        # Clean up previous worker if exists
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.quit()
+            self.active_worker.wait(1000)
+        
         # Disable buttons during generation
         self.generate_btn.setEnabled(False)
         self.regenerate_btn.setEnabled(False)
@@ -1325,11 +1376,11 @@ Barcode at the bottom corner."""
         self.log_status(f"Starting image generation ({width}x{height})...")
         
         # Create and start worker thread
-        self.worker = WorkflowRunner(prompt, seed=seed, width=width, height=height)
-        self.worker.status.connect(self.log_status)
-        self.worker.error.connect(self.log_error)
-        self.worker.finished.connect(self.on_generation_complete)
-        self.worker.start()
+        self.active_worker = WorkflowRunner(prompt, seed=seed, width=width, height=height)
+        self.active_worker.status.connect(self.log_status)
+        self.active_worker.error.connect(self.log_error)
+        self.active_worker.finished.connect(self.on_generation_complete)
+        self.active_worker.start()
     
     def log_error(self, message):
         """Log error message in red"""
@@ -1368,8 +1419,8 @@ Barcode at the bottom corner."""
                 self.save_btn.setEnabled(True)
                 
                 # Store the seed used for this generation
-                if hasattr(self.worker, 'seed'):
-                    self.current_seed = self.worker.seed
+                if hasattr(self.active_worker, 'seed'):
+                    self.current_seed = self.active_worker.seed
                     self.log_status(f"✓ Image generation completed successfully! (Seed: {self.current_seed})")
                 else:
                     self.log_status("✓ Image generation completed successfully!")
@@ -1438,6 +1489,20 @@ Barcode at the bottom corner."""
         """Open batch mode dialog"""
         dialog = BatchModeDialog(self)
         dialog.exec()
+    
+    def closeEvent(self, event):
+        """Clean up threads when main window closes"""
+        # Wait for active worker to finish
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.quit()
+            self.active_worker.wait(2000)
+        
+        # Wait for prompt generator to finish
+        if hasattr(self, 'prompt_generator') and self.prompt_generator.isRunning():
+            self.prompt_generator.quit()
+            self.prompt_generator.wait(2000)
+        
+        event.accept()
 
 
 def main():
