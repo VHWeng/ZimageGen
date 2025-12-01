@@ -1012,7 +1012,7 @@ class ComfyUIGUI(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("ComfyUI Z-Image Turbo Generator")
-        self.setGeometry(100, 100, 900, 900)
+        self.setGeometry(100, 100, 900, 1200)
         
         # Central widget
         central_widget = QWidget()
