@@ -10,10 +10,79 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QTextEdit, QLabel, 
                              QScrollArea, QFileDialog, QMessageBox, QComboBox, 
                              QLineEdit, QGroupBox, QTableWidget, QTableWidgetItem,
-                             QDialog, QHeaderView, QAbstractItemView)
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+                             QDialog, QHeaderView, QAbstractItemView, QFrame)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QColor
 from PIL import Image
+
+
+class WorkflowLoader(QThread):
+    """Thread to load and validate ComfyUI workflow"""
+    finished = pyqtSignal(bool, str, dict)  # success, message, workflow_data
+    error = pyqtSignal(str)
+    
+    def __init__(self, workflow_path, server_address="127.0.0.1:8188"):
+        super().__init__()
+        self.workflow_path = workflow_path
+        self.server_address = server_address
+    
+    def run(self):
+        """Load and validate workflow file"""
+        try:
+            with open(self.workflow_path, 'r', encoding='utf-8') as f:
+                workflow_data = json.load(f)
+            
+            # Check if it's a valid ComfyUI workflow
+            if 'nodes' in workflow_data or 'prompt' in workflow_data:
+                # Try to extract the actual workflow structure
+                if 'nodes' in workflow_data:
+                    # This is a full workflow with UI data
+                    self.finished.emit(True, "Workflow loaded successfully", workflow_data)
+                else:
+                    # This might be just the prompt data
+                    self.finished.emit(True, "Workflow loaded successfully", workflow_data)
+            else:
+                self.error.emit("Invalid workflow format")
+                self.finished.emit(False, "Invalid workflow format", {})
+                
+        except json.JSONDecodeError as e:
+            self.error.emit(f"Invalid JSON: {str(e)}")
+            self.finished.emit(False, f"Invalid JSON: {str(e)}", {})
+        except Exception as e:
+            self.error.emit(f"Failed to load workflow: {str(e)}")
+            self.finished.emit(False, f"Failed to load workflow: {str(e)}", {})
+
+
+class ServerStatusChecker(QThread):
+    """Thread to check ComfyUI server status"""
+    status_update = pyqtSignal(bool, str)  # is_online, message
+    
+    def __init__(self, server_address="127.0.0.1:8188"):
+        super().__init__()
+        self.server_address = server_address
+        self.running = True
+    
+    def run(self):
+        """Check server status"""
+        try:
+            response = requests.get(
+                f"http://{self.server_address}/system_stats",
+                timeout=2
+            )
+            
+            if response.status_code == 200:
+                self.status_update.emit(True, "Online")
+            else:
+                self.status_update.emit(False, f"Error {response.status_code}")
+                
+        except requests.exceptions.ConnectionError:
+            self.status_update.emit(False, "Offline")
+        except Exception as e:
+            self.status_update.emit(False, "Error")
+    
+    def stop(self):
+        """Stop the checker"""
+        self.running = False
 
 
 class BatchPromptGenerator(QThread):
@@ -767,7 +836,7 @@ class WorkflowRunner(QThread):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     
-    def __init__(self, prompt_text, server_address="127.0.0.1:8188", seed=None, width=512, height=512):
+    def __init__(self, prompt_text, server_address="127.0.0.1:8188", seed=None, width=512, height=512, custom_workflow=None):
         super().__init__()
         self.prompt_text = prompt_text
         self.server_address = server_address
@@ -775,6 +844,7 @@ class WorkflowRunner(QThread):
         self.seed = seed
         self.width = width
         self.height = height
+        self.custom_workflow = custom_workflow  # Custom workflow data if provided
         
     def load_workflow(self, width=512, height=512):
         """Load and modify the workflow with the new prompt"""
@@ -784,7 +854,12 @@ class WorkflowRunner(QThread):
         if self.seed is None:
             self.seed = random.randint(0, 2**32 - 1)
         
-        # Base workflow structure from the JSON
+        # If custom workflow is provided, use it
+        if self.custom_workflow:
+            # Try to intelligently update the custom workflow
+            return self.update_custom_workflow(self.custom_workflow, width, height)
+        
+        # Default Z-Image Turbo workflow
         workflow = {
             "27": {
                 "inputs": {
@@ -865,6 +940,147 @@ class WorkflowRunner(QThread):
             }
         }
         return workflow
+    
+    def update_custom_workflow(self, workflow_data, width, height):
+        """Update custom workflow with current parameters"""
+        # Make a deep copy to avoid modifying original
+        import copy
+        workflow = copy.deepcopy(workflow_data)
+        
+        # Try to find and update common node types
+        # This is a best-effort approach for custom workflows
+        
+        if 'nodes' in workflow:
+            # Full workflow format with UI data - extract prompt
+            nodes = workflow.get('nodes', [])
+            prompt_dict = {}
+            
+            # List of UI-only nodes that shouldn't be in the prompt
+            ui_only_nodes = [
+                'Note', 'MarkdownNote', 'PrimitiveNode', 'Reroute',
+                'JunctionNode', 'PreviewImage', 'LoadImageMask'
+            ]
+            
+            for node in nodes:
+                node_id = str(node.get('id', ''))
+                node_type = node.get('type', '')
+                
+                # Skip UI-only nodes
+                if node_type in ui_only_nodes:
+                    continue
+                
+                # Create simplified prompt structure
+                if node_type and 'inputs' in node:
+                    # Get inputs, filtering out UI elements
+                    inputs = {}
+                    node_inputs = node.get('inputs', [])
+                    
+                    # Handle both list and dict input formats
+                    if isinstance(node_inputs, list):
+                        # List format from UI - extract actual input values
+                        for inp in node_inputs:
+                            if isinstance(inp, dict):
+                                name = inp.get('name')
+                                # Check if there's a link or widget value
+                                if 'link' in inp and inp['link'] is not None:
+                                    # This is a connection, need to find the link
+                                    inputs[name] = None  # Will be set by links
+                    else:
+                        # Already in dict format
+                        inputs = node_inputs
+                    
+                    # Get widget values if present
+                    widgets = node.get('widgets_values', [])
+                    
+                    # Map widgets to inputs based on common patterns
+                    if node_type == 'CLIPTextEncode' and widgets:
+                        inputs['text'] = widgets[0] if widgets else ""
+                    elif node_type == 'KSampler' and len(widgets) >= 6:
+                        inputs['seed'] = widgets[0]
+                        inputs['steps'] = widgets[2]
+                        inputs['cfg'] = widgets[3]
+                        inputs['sampler_name'] = widgets[4]
+                        inputs['scheduler'] = widgets[5]
+                        inputs['denoise'] = widgets[6] if len(widgets) > 6 else 1.0
+                    elif node_type in ['EmptyLatentImage', 'EmptySD3LatentImage'] and len(widgets) >= 2:
+                        inputs['width'] = widgets[0]
+                        inputs['height'] = widgets[1]
+                        inputs['batch_size'] = widgets[2] if len(widgets) > 2 else 1
+                    elif node_type == 'CheckpointLoaderSimple' and widgets:
+                        inputs['ckpt_name'] = widgets[0]
+                    elif node_type == 'SaveImage' and widgets:
+                        inputs['filename_prefix'] = widgets[0] if widgets else "ComfyUI"
+                    
+                    prompt_dict[node_id] = {
+                        'inputs': inputs,
+                        'class_type': node_type
+                    }
+            
+            # Now process links to set up connections
+            links = workflow.get('links', [])
+            for link in links:
+                if len(link) >= 6:
+                    # link format: [id, source_node, source_slot, target_node, target_slot, type]
+                    source_node = str(link[1])
+                    source_slot = link[2]
+                    target_node = str(link[3])
+                    target_slot = link[4]
+                    
+                    # Find input name for target
+                    if target_node in prompt_dict:
+                        target_node_data = None
+                        for node in nodes:
+                            if str(node.get('id')) == target_node:
+                                target_node_data = node
+                                break
+                        
+                        if target_node_data:
+                            target_inputs = target_node_data.get('inputs', [])
+                            if isinstance(target_inputs, list) and target_slot < len(target_inputs):
+                                input_name = target_inputs[target_slot].get('name')
+                                if input_name:
+                                    # Set the connection
+                                    prompt_dict[target_node]['inputs'][input_name] = [source_node, source_slot]
+            
+            # Try to update text, seed, and dimensions in the extracted prompt
+            self.update_workflow_params(prompt_dict, width, height)
+            return prompt_dict
+            
+        else:
+            # Already in prompt format
+            self.update_workflow_params(workflow, width, height)
+            return workflow
+    
+    def update_workflow_params(self, workflow, width, height):
+        """Update workflow parameters (prompt, seed, dimensions)"""
+        for node_id, node_data in workflow.items():
+            if not isinstance(node_data, dict):
+                continue
+                
+            inputs = node_data.get('inputs', {})
+            class_type = node_data.get('class_type', '')
+            
+            # Update positive text prompts (look for common naming patterns)
+            if class_type in ['CLIPTextEncode', 'CLIPTextEncodeSDXL']:
+                if 'text' in inputs:
+                    # Check if this is likely the positive prompt
+                    # (not the negative one which often has "negative" in title)
+                    current_text = inputs.get('text', '')
+                    # Only update if it seems like a positive prompt or is the first one
+                    if not any(neg_word in str(current_text).lower()[:100] 
+                              for neg_word in ['negative', 'worst', 'ugly', 'bad']):
+                        inputs['text'] = self.prompt_text
+            
+            # Update seed
+            if 'seed' in inputs and isinstance(inputs['seed'], int):
+                inputs['seed'] = self.seed
+            
+            # Update dimensions
+            if class_type in ['EmptyLatentImage', 'EmptySD3LatentImage']:
+                if 'width' in inputs:
+                    inputs['width'] = width
+                if 'height' in inputs:
+                    inputs['height'] = height
     
     def run(self):
         """Execute the workflow"""
@@ -983,6 +1199,9 @@ class ComfyUIGUI(QMainWindow):
         self.current_phrase = ""
         self.image_counter = {}  # Track counters per phrase
         self.active_worker = None  # Track active worker thread
+        self.custom_workflow = None  # Store loaded custom workflow
+        self.workflow_loaded = False
+        self.server_address = "127.0.0.1:8188"
         
         # Image size presets
         self.size_presets = {
@@ -1012,7 +1231,7 @@ class ComfyUIGUI(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("ComfyUI Z-Image Turbo Generator")
-        self.setGeometry(100, 100, 900, 1200)
+        self.setGeometry(100, 100, 900, 900)
         
         # Central widget
         central_widget = QWidget()
@@ -1075,6 +1294,60 @@ Small cover text: "Youth & Freedom", "Tokyo Street Issue", "Vol. 24 | August 202
 Barcode at the bottom corner."""
         self.prompt_text.setText(default_prompt)
         layout.addWidget(self.prompt_text)
+        
+        # Workflow Selection Section
+        workflow_section = QGroupBox("ComfyUI Workflow Configuration")
+        workflow_layout = QHBoxLayout()
+        
+        workflow_label = QLabel("Workflow File:")
+        workflow_layout.addWidget(workflow_label)
+        
+        self.workflow_path_label = QLabel("Default Z-Image Turbo")
+        self.workflow_path_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+        workflow_layout.addWidget(self.workflow_path_label)
+        
+        self.load_workflow_btn = QPushButton("📂 Load Workflow")
+        self.load_workflow_btn.clicked.connect(self.load_custom_workflow)
+        workflow_layout.addWidget(self.load_workflow_btn)
+        
+        self.reset_workflow_btn = QPushButton("🔄 Reset to Default")
+        self.reset_workflow_btn.clicked.connect(self.reset_to_default_workflow)
+        workflow_layout.addWidget(self.reset_workflow_btn)
+        
+        workflow_layout.addStretch()
+        
+        # Server status indicator
+        status_separator = QFrame()
+        status_separator.setFrameShape(QFrame.Shape.VLine)
+        status_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        workflow_layout.addWidget(status_separator)
+        
+        server_label = QLabel("ComfyUI Server:")
+        workflow_layout.addWidget(server_label)
+        
+        self.server_status_label = QLabel("⚪ Checking...")
+        self.server_status_label.setStyleSheet("QLabel { font-weight: bold; }")
+        workflow_layout.addWidget(self.server_status_label)
+        
+        self.check_server_btn = QPushButton("🔍 Check")
+        self.check_server_btn.clicked.connect(self.check_server_status)
+        workflow_layout.addWidget(self.check_server_btn)
+        
+        # Workflow status indicator
+        workflow_status_separator = QFrame()
+        workflow_status_separator.setFrameShape(QFrame.Shape.VLine)
+        workflow_status_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        workflow_layout.addWidget(workflow_status_separator)
+        
+        wf_status_label = QLabel("Workflow:")
+        workflow_layout.addWidget(wf_status_label)
+        
+        self.workflow_status_label = QLabel("✓ Default Loaded")
+        self.workflow_status_label.setStyleSheet("QLabel { font-weight: bold; color: green; }")
+        workflow_layout.addWidget(self.workflow_status_label)
+        
+        workflow_section.setLayout(workflow_layout)
+        layout.addWidget(workflow_section)
         
         # Image size and aspect ratio controls
         size_controls_layout = QHBoxLayout()
@@ -1181,6 +1454,71 @@ Barcode at the bottom corner."""
         
         # Load Ollama models on startup
         self.refresh_ollama_models()
+        
+        # Check server status on startup
+        QTimer.singleShot(500, self.check_server_status)  # Check after 500ms
+    
+    def load_custom_workflow(self):
+        """Load a custom ComfyUI workflow file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load ComfyUI Workflow",
+            "",
+            "JSON Files (*.json);;All Files (*.*)"
+        )
+        
+        if file_path:
+            self.log_status(f"Loading workflow: {Path(file_path).name}")
+            
+            # Start workflow loader thread
+            self.workflow_loader = WorkflowLoader(file_path, self.server_address)
+            self.workflow_loader.finished.connect(self.on_workflow_loaded)
+            self.workflow_loader.error.connect(self.log_error)
+            self.workflow_loader.start()
+    
+    def on_workflow_loaded(self, success, message, workflow_data):
+        """Handle workflow loading completion"""
+        if success:
+            self.custom_workflow = workflow_data
+            self.workflow_loaded = True
+            self.workflow_path_label.setText(f"Custom: {message}")
+            self.workflow_status_label.setText("✓ Custom Loaded")
+            self.workflow_status_label.setStyleSheet("QLabel { font-weight: bold; color: green; }")
+            self.log_status(f"✓ {message}")
+        else:
+            self.workflow_status_label.setText("✗ Load Failed")
+            self.workflow_status_label.setStyleSheet("QLabel { font-weight: bold; color: red; }")
+            self.log_error(message)
+    
+    def reset_to_default_workflow(self):
+        """Reset to default Z-Image Turbo workflow"""
+        self.custom_workflow = None
+        self.workflow_loaded = False
+        self.workflow_path_label.setText("Default Z-Image Turbo")
+        self.workflow_status_label.setText("✓ Default Loaded")
+        self.workflow_status_label.setStyleSheet("QLabel { font-weight: bold; color: green; }")
+        self.log_status("✓ Reset to default Z-Image Turbo workflow")
+    
+    def check_server_status(self):
+        """Check ComfyUI server status"""
+        self.server_status_label.setText("⚪ Checking...")
+        self.server_status_label.setStyleSheet("QLabel { font-weight: bold; }")
+        
+        # Start status checker thread
+        self.status_checker = ServerStatusChecker(self.server_address)
+        self.status_checker.status_update.connect(self.on_server_status_update)
+        self.status_checker.start()
+    
+    def on_server_status_update(self, is_online, message):
+        """Handle server status update"""
+        if is_online:
+            self.server_status_label.setText(f"🟢 {message}")
+            self.server_status_label.setStyleSheet("QLabel { font-weight: bold; color: green; }")
+            self.log_status(f"✓ ComfyUI server is {message}")
+        else:
+            self.server_status_label.setText(f"🔴 {message}")
+            self.server_status_label.setStyleSheet("QLabel { font-weight: bold; color: red; }")
+            self.log_error(f"ComfyUI server is {message}")
     
     def refresh_ollama_models(self):
         """Fetch available Ollama models"""
@@ -1375,8 +1713,15 @@ Barcode at the bottom corner."""
         
         self.log_status(f"Starting image generation ({width}x{height})...")
         
-        # Create and start worker thread
-        self.active_worker = WorkflowRunner(prompt, seed=seed, width=width, height=height)
+        # Create and start worker thread with custom workflow if loaded
+        self.active_worker = WorkflowRunner(
+            prompt, 
+            server_address=self.server_address,
+            seed=seed, 
+            width=width, 
+            height=height,
+            custom_workflow=self.custom_workflow
+        )
         self.active_worker.status.connect(self.log_status)
         self.active_worker.error.connect(self.log_error)
         self.active_worker.finished.connect(self.on_generation_complete)
