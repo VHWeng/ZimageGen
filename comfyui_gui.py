@@ -4,14 +4,664 @@ import requests
 import base64
 import io
 import re
+import csv
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QTextEdit, QLabel, 
                              QScrollArea, QFileDialog, QMessageBox, QComboBox, 
-                             QLineEdit, QGroupBox)
+                             QLineEdit, QGroupBox, QTableWidget, QTableWidgetItem,
+                             QDialog, QHeaderView, QAbstractItemView)
 from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap, QImage, QColor
 from PIL import Image
+
+
+class BatchPromptGenerator(QThread):
+    """Thread to generate multiple prompts in batch using Ollama JSON mode"""
+    finished = pyqtSignal(list)  # Emits list of generated prompts
+    error = pyqtSignal(str)
+    status = pyqtSignal(str)
+    progress = pyqtSignal(int, int)  # current, total
+    
+    def __init__(self, batch_data, model, ollama_url="http://127.0.0.1:11434"):
+        super().__init__()
+        self.batch_data = batch_data  # List of (phrase, description) tuples
+        self.model = model
+        self.ollama_url = ollama_url
+    
+    def run(self):
+        """Generate prompts in batch using JSON mode"""
+        try:
+            results = []
+            batch_size = 10  # Process in batches to stay under token limits
+            total_items = len(self.batch_data)
+            
+            for i in range(0, total_items, batch_size):
+                batch = self.batch_data[i:i+batch_size]
+                self.status.emit(f"Processing batch {i//batch_size + 1}...")
+                
+                # Create batch prompt
+                items_json = []
+                for idx, (phrase, desc) in enumerate(batch):
+                    item = {"id": i + idx, "phrase": phrase}
+                    if desc:
+                        item["description"] = desc
+                    items_json.append(item)
+                
+                system_prompt = """You are an expert at creating detailed image generation prompts.
+For each item in the JSON array, create a detailed, vivid prompt suitable for an AI image generator.
+Include details about: style, composition, lighting, mood, colors, and technical aspects.
+Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding a "prompt" field to each item."""
+
+                user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
+                
+                try:
+                    response = requests.post(
+                        f"{self.ollama_url}/api/generate",
+                        json={
+                            "model": self.model,
+                            "prompt": f"{system_prompt}\n\n{user_prompt}",
+                            "stream": False,
+                            "format": "json"
+                        },
+                        timeout=300
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        generated_text = result.get('response', '').strip()
+                        
+                        # Parse JSON response
+                        try:
+                            prompts_data = json.loads(generated_text)
+                            
+                            # Handle both array and object responses
+                            if isinstance(prompts_data, dict) and 'prompts' in prompts_data:
+                                prompts_data = prompts_data['prompts']
+                            
+                            for item in prompts_data:
+                                results.append(item.get('prompt', ''))
+                            
+                            self.progress.emit(len(results), total_items)
+                            
+                        except json.JSONDecodeError:
+                            # Fallback: treat as text and split
+                            self.error.emit(f"JSON parse error in batch {i//batch_size + 1}, using fallback")
+                            for _ in batch:
+                                results.append(generated_text[:500] if generated_text else "")
+                    else:
+                        self.error.emit(f"Batch {i//batch_size + 1} failed: {response.status_code}")
+                        for _ in batch:
+                            results.append("")
+                            
+                except Exception as e:
+                    self.error.emit(f"Error in batch {i//batch_size + 1}: {str(e)}")
+                    for _ in batch:
+                        results.append("")
+            
+            self.status.emit("✓ Batch prompt generation completed!")
+            self.finished.emit(results)
+            
+        except Exception as e:
+            self.error.emit(f"Batch generation error: {str(e)}")
+            self.finished.emit([])
+
+
+class BatchImageGenerator(QThread):
+    """Thread to generate multiple images in batch"""
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    status = pyqtSignal(str)
+    progress = pyqtSignal(int, int)  # current, total
+    image_generated = pyqtSignal(int, object)  # row_index, image_data
+    
+    def __init__(self, batch_items, width=512, height=512):
+        super().__init__()
+        self.batch_items = batch_items  # List of (prompt, filename) tuples
+        self.width = width
+        self.height = height
+    
+    def run(self):
+        """Generate images in batch"""
+        try:
+            total = len(self.batch_items)
+            
+            for idx, (prompt, filename) in enumerate(self.batch_items):
+                self.status.emit(f"Generating image {idx + 1}/{total}: {filename}")
+                self.progress.emit(idx + 1, total)
+                
+                # Generate image using WorkflowRunner logic
+                worker = WorkflowRunner(prompt, width=self.width, height=self.height)
+                workflow = worker.load_workflow(self.width, self.height)
+                
+                prompt_data = {"prompt": workflow}
+                response = requests.post(
+                    "http://127.0.0.1:8188/prompt",
+                    json=prompt_data,
+                    timeout=300
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    prompt_id = result.get('prompt_id')
+                    
+                    if prompt_id:
+                        image_data = worker.wait_for_completion(prompt_id)
+                        if image_data:
+                            self.image_generated.emit(idx, image_data)
+                        else:
+                            self.error.emit(f"Failed to generate: {filename}")
+                            self.image_generated.emit(idx, None)
+                    else:
+                        self.error.emit(f"No prompt_id for: {filename}")
+                        self.image_generated.emit(idx, None)
+                else:
+                    self.error.emit(f"Failed to queue: {filename}")
+                    self.image_generated.emit(idx, None)
+            
+            self.status.emit("✓ Batch image generation completed!")
+            self.finished.emit()
+            
+        except Exception as e:
+            self.error.emit(f"Batch generation error: {str(e)}")
+            self.finished.emit()
+
+
+class BatchModeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.batch_data = []
+        self.image_data = {}  # Store generated images by row index
+        self.current_selected_row = -1
+        self.init_ui()
+    
+    def init_ui(self):
+        self.setWindowTitle("Batch Mode - Multi-Image Generation")
+        self.setGeometry(100, 100, 1400, 800)
+        
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # File loading section
+        file_layout = QHBoxLayout()
+        
+        self.load_file_btn = QPushButton("📁 Load File")
+        self.load_file_btn.clicked.connect(self.load_file)
+        file_layout.addWidget(self.load_file_btn)
+        
+        delimiter_label = QLabel("CSV Delimiter:")
+        file_layout.addWidget(delimiter_label)
+        
+        self.delimiter_combo = QComboBox()
+        self.delimiter_combo.addItems(["Comma (,)", "Tab", "Semicolon (;)", "Pipe (|)"])
+        file_layout.addWidget(self.delimiter_combo)
+        
+        file_layout.addStretch()
+        layout.addLayout(file_layout)
+        
+        # Main content area with image preview and table
+        content_layout = QHBoxLayout()
+        
+        # Left side: Image preview
+        preview_layout = QVBoxLayout()
+        preview_label = QLabel("Image Preview:")
+        preview_layout.addWidget(preview_label)
+        
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setMinimumWidth(400)
+        
+        self.preview_image_label = QLabel()
+        self.preview_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image_label.setText("No image selected")
+        self.preview_image_label.setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ccc; }")
+        
+        self.preview_scroll.setWidget(self.preview_image_label)
+        preview_layout.addWidget(self.preview_scroll)
+        
+        content_layout.addLayout(preview_layout, 1)
+        
+        # Right side: Spreadsheet table
+        table_layout = QVBoxLayout()
+        table_label = QLabel("Batch Data (Editable):")
+        table_layout.addWidget(table_label)
+        
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "Phrase/Word", "Description", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
+        ])
+        self.table.horizontalHeader().setStretchLastSection(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(0, 150)
+        self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(3, 200)
+        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(5, 100)
+        self.table.itemSelectionChanged.connect(self.on_row_selected)
+        
+        table_layout.addWidget(self.table)
+        content_layout.addLayout(table_layout, 2)
+        
+        layout.addLayout(content_layout)
+        
+        # Control buttons
+        button_layout = QHBoxLayout()
+        
+        self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
+        self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
+        button_layout.addWidget(self.gen_prompts_btn)
+        
+        self.process_batch_btn = QPushButton("🎨 Process Batch (Generate Images)")
+        self.process_batch_btn.clicked.connect(self.process_batch)
+        button_layout.addWidget(self.process_batch_btn)
+        
+        self.save_csv_btn = QPushButton("💾 Save CSV")
+        self.save_csv_btn.clicked.connect(self.save_csv)
+        button_layout.addWidget(self.save_csv_btn)
+        
+        self.save_images_btn = QPushButton("💾 Save All Images")
+        self.save_images_btn.clicked.connect(self.save_all_images)
+        button_layout.addWidget(self.save_images_btn)
+        
+        button_layout.addStretch()
+        
+        # Status indicator
+        self.status_indicator = QLabel("⚪ Ready")
+        self.status_indicator.setStyleSheet("QLabel { font-weight: bold; }")
+        button_layout.addWidget(self.status_indicator)
+        
+        # Progress label
+        self.progress_label = QLabel("0 / 0")
+        button_layout.addWidget(self.progress_label)
+        
+        layout.addLayout(button_layout)
+        
+        # Status text box
+        status_box_label = QLabel("Status Messages:")
+        layout.addWidget(status_box_label)
+        
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setMaximumHeight(80)
+        layout.addWidget(self.status_text)
+        
+        self.log_status("Ready. Load a CSV/text file to begin.")
+    
+    def log_status(self, message):
+        """Add status message"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.status_text.append(f"[{timestamp}] {message}")
+        cursor = self.status_text.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.status_text.setTextCursor(cursor)
+    
+    def log_error(self, message):
+        """Add error message"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.status_text.append(f'<span style="color: red;">[{timestamp}] ERROR: {message}</span>')
+        cursor = self.status_text.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.status_text.setTextCursor(cursor)
+    
+    def set_busy(self, is_busy):
+        """Update status indicator"""
+        if is_busy:
+            self.status_indicator.setText("🔴 Busy")
+            self.status_indicator.setStyleSheet("QLabel { font-weight: bold; color: red; }")
+        else:
+            self.status_indicator.setText("🟢 Done")
+            self.status_indicator.setStyleSheet("QLabel { font-weight: bold; color: green; }")
+    
+    def get_delimiter(self):
+        """Get selected delimiter"""
+        delim_map = {
+            "Comma (,)": ",",
+            "Tab": "\t",
+            "Semicolon (;)": ";",
+            "Pipe (|)": "|"
+        }
+        return delim_map.get(self.delimiter_combo.currentText(), ",")
+    
+    def load_file(self):
+        """Load CSV or text file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open File",
+            "",
+            "CSV Files (*.csv);;Text Files (*.txt);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                delimiter = self.get_delimiter()
+                
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f, delimiter=delimiter)
+                    data = list(reader)
+                
+                if data:
+                    self.populate_table(data)
+                    self.log_status(f"✓ Loaded {len(data)} rows from {Path(file_path).name}")
+                else:
+                    self.log_error("File is empty")
+                    
+            except Exception as e:
+                self.log_error(f"Failed to load file: {str(e)}")
+    
+    def populate_table(self, data):
+        """Populate table with loaded data"""
+        self.table.setRowCount(len(data))
+        
+        for row_idx, row_data in enumerate(data):
+            # Column 0: Phrase
+            phrase = row_data[0] if len(row_data) > 0 else ""
+            self.table.setItem(row_idx, 0, QTableWidgetItem(phrase))
+            
+            # Column 1: Description
+            desc = row_data[1] if len(row_data) > 1 else ""
+            self.table.setItem(row_idx, 1, QTableWidgetItem(desc))
+            
+            # Column 2: Prompt
+            prompt = row_data[2] if len(row_data) > 2 else ""
+            self.table.setItem(row_idx, 2, QTableWidgetItem(prompt))
+            
+            # Column 3: Filename (auto-generate if empty)
+            if len(row_data) > 3 and row_data[3]:
+                filename = row_data[3]
+            else:
+                filename = self.generate_filename(phrase, row_idx)
+            self.table.setItem(row_idx, 3, QTableWidgetItem(filename))
+            
+            # Column 4: Regen Prompt button
+            regen_prompt_btn = QPushButton("🔄")
+            regen_prompt_btn.clicked.connect(lambda checked, r=row_idx: self.regenerate_single_prompt(r))
+            self.table.setCellWidget(row_idx, 4, regen_prompt_btn)
+            
+            # Column 5: Regen Image button
+            regen_image_btn = QPushButton("🎨")
+            regen_image_btn.clicked.connect(lambda checked, r=row_idx: self.regenerate_single_image(r))
+            self.table.setCellWidget(row_idx, 5, regen_image_btn)
+    
+    def generate_filename(self, phrase, index):
+        """Generate filename from phrase and index"""
+        clean_phrase = re.sub(r'[^\w\s-]', '', phrase)
+        clean_phrase = re.sub(r'[-\s]+', '_', clean_phrase).strip('_')
+        clean_phrase = clean_phrase[:30]  # Limit length
+        return f"{clean_phrase}_{index+1:04d}"
+    
+    def generate_all_prompts(self):
+        """Generate prompts for all rows using batch processing"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Please load a file first!")
+            return
+        
+        if not self.parent_window:
+            QMessageBox.warning(self, "Error", "Parent window not available!")
+            return
+        
+        model = self.parent_window.ollama_model_combo.currentText()
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+            return
+        
+        # Collect batch data
+        batch_data = []
+        for row in range(self.table.rowCount()):
+            phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+            desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+            if phrase:
+                batch_data.append((phrase, desc))
+        
+        if not batch_data:
+            QMessageBox.warning(self, "No Data", "No phrases to process!")
+            return
+        
+        self.set_busy(True)
+        self.gen_prompts_btn.setEnabled(False)
+        
+        # Start batch prompt generation
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model)
+        self.batch_prompt_gen.status.connect(self.log_status)
+        self.batch_prompt_gen.error.connect(self.log_error)
+        self.batch_prompt_gen.progress.connect(self.update_progress)
+        self.batch_prompt_gen.finished.connect(self.on_batch_prompts_generated)
+        self.batch_prompt_gen.start()
+    
+    def on_batch_prompts_generated(self, prompts):
+        """Handle batch prompt generation completion"""
+        self.gen_prompts_btn.setEnabled(True)
+        self.set_busy(False)
+        
+        # Update table with generated prompts
+        for row_idx, prompt in enumerate(prompts):
+            if row_idx < self.table.rowCount():
+                self.table.setItem(row_idx, 2, QTableWidgetItem(prompt))
+        
+        self.log_status(f"✓ Generated {len(prompts)} prompts")
+    
+    def regenerate_single_prompt(self, row):
+        """Regenerate prompt for a single row"""
+        phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+        desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+        
+        if not phrase:
+            QMessageBox.warning(self, "No Phrase", "Please enter a phrase first!")
+            return
+        
+        model = self.parent_window.ollama_model_combo.currentText()
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+            return
+        
+        self.log_status(f"Regenerating prompt for row {row + 1}...")
+        
+        # Use single prompt generator
+        self.single_prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model)
+        self.single_prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
+        self.single_prompt_gen.error.connect(self.log_error)
+        self.single_prompt_gen.start()
+    
+    def on_single_prompt_generated(self, row, prompt):
+        """Handle single prompt generation"""
+        if prompt:
+            self.table.setItem(row, 2, QTableWidgetItem(prompt))
+            self.log_status(f"✓ Prompt regenerated for row {row + 1}")
+    
+    def regenerate_single_image(self, row):
+        """Regenerate image for a single row"""
+        prompt = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+        filename = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+        
+        if not prompt:
+            QMessageBox.warning(self, "No Prompt", "Please generate a prompt first!")
+            return
+        
+        self.log_status(f"Generating image for row {row + 1}: {filename}")
+        
+        # Get dimensions from parent
+        width, height = self.parent_window.get_current_dimensions()
+        
+        # Generate single image
+        self.single_img_row = row
+        worker = WorkflowRunner(prompt, width=width, height=height)
+        worker.finished.connect(lambda img: self.on_single_image_generated(self.single_img_row, img))
+        worker.error.connect(self.log_error)
+        worker.start()
+    
+    def on_single_image_generated(self, row, image_data):
+        """Handle single image generation"""
+        if image_data:
+            self.image_data[row] = image_data
+            self.log_status(f"✓ Image generated for row {row + 1}")
+            
+            # Update preview if this row is selected
+            if self.current_selected_row == row:
+                self.display_preview_image(image_data)
+    
+    def process_batch(self):
+        """Process entire batch to generate all images"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Please load a file first!")
+            return
+        
+        # Collect batch items
+        batch_items = []
+        for row in range(self.table.rowCount()):
+            prompt = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+            filename = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+            
+            if prompt:
+                batch_items.append((prompt, filename))
+        
+        if not batch_items:
+            QMessageBox.warning(self, "No Prompts", "Please generate prompts first!")
+            return
+        
+        self.set_busy(True)
+        self.process_batch_btn.setEnabled(False)
+        
+        # Get dimensions from parent
+        width, height = self.parent_window.get_current_dimensions()
+        
+        # Start batch image generation
+        self.batch_img_gen = BatchImageGenerator(batch_items, width, height)
+        self.batch_img_gen.status.connect(self.log_status)
+        self.batch_img_gen.error.connect(self.log_error)
+        self.batch_img_gen.progress.connect(self.update_progress)
+        self.batch_img_gen.image_generated.connect(self.on_batch_image_generated)
+        self.batch_img_gen.finished.connect(self.on_batch_processing_complete)
+        self.batch_img_gen.start()
+    
+    def on_batch_image_generated(self, row_idx, image_data):
+        """Handle individual image generation in batch"""
+        if image_data:
+            self.image_data[row_idx] = image_data
+    
+    def on_batch_processing_complete(self):
+        """Handle batch processing completion"""
+        self.process_batch_btn.setEnabled(True)
+        self.set_busy(False)
+        self.log_status(f"✓ Batch processing complete! Generated {len(self.image_data)} images")
+    
+    def update_progress(self, current, total):
+        """Update progress display"""
+        self.progress_label.setText(f"{current} / {total}")
+    
+    def on_row_selected(self):
+        """Handle row selection to show image preview"""
+        selected = self.table.selectedItems()
+        if selected:
+            row = selected[0].row()
+            self.current_selected_row = row
+            
+            if row in self.image_data:
+                self.display_preview_image(self.image_data[row])
+            else:
+                self.preview_image_label.setText("No image generated yet")
+    
+    def display_preview_image(self, image_data):
+        """Display image in preview area"""
+        try:
+            image = Image.open(io.BytesIO(image_data))
+            
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+            
+            qimage = QImage.fromData(img_byte_arr.read())
+            pixmap = QPixmap.fromImage(qimage)
+            
+            scaled_pixmap = pixmap.scaled(
+                380, 380,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            self.preview_image_label.setPixmap(scaled_pixmap)
+            
+        except Exception as e:
+            self.log_error(f"Failed to display preview: {str(e)}")
+    
+    def save_csv(self):
+        """Save updated CSV file"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save CSV File",
+            "batch_output.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if file_path:
+            try:
+                delimiter = self.get_delimiter()
+                
+                with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f, delimiter=delimiter)
+                    
+                    for row in range(self.table.rowCount()):
+                        row_data = []
+                        for col in range(4):  # Only save first 4 columns
+                            item = self.table.item(row, col)
+                            row_data.append(item.text() if item else "")
+                        writer.writerow(row_data)
+                
+                self.log_status(f"✓ CSV saved to {file_path}")
+                QMessageBox.information(self, "Success", f"CSV saved to:\n{file_path}")
+                
+            except Exception as e:
+                self.log_error(f"Failed to save CSV: {str(e)}")
+    
+    def save_all_images(self):
+        """Save all generated images to output directory"""
+        if not self.image_data:
+            QMessageBox.warning(self, "No Images", "No images to save!")
+            return
+        
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory",
+            ""
+        )
+        
+        if output_dir:
+            try:
+                output_path = Path(output_dir) / "Output"
+                output_path.mkdir(exist_ok=True)
+                
+                saved_count = 0
+                for row_idx, image_data in self.image_data.items():
+                    filename = self.table.item(row_idx, 3).text() if self.table.item(row_idx, 3) else f"image_{row_idx:04d}"
+                    
+                    if not filename.endswith('.jpg'):
+                        filename += '.jpg'
+                    
+                    file_path = output_path / filename
+                    
+                    # Save image
+                    image = Image.open(io.BytesIO(image_data))
+                    
+                    if image.mode in ('RGBA', 'LA', 'P'):
+                        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+                        if image.mode == 'P':
+                            image = image.convert('RGBA')
+                        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+                        image = rgb_image
+                    
+                    image.save(file_path, 'JPEG', quality=95)
+                    saved_count += 1
+                
+                self.log_status(f"✓ Saved {saved_count} images to {output_path}")
+                QMessageBox.information(self, "Success", f"Saved {saved_count} images to:\n{output_path}")
+                
+            except Exception as e:
+                self.log_error(f"Failed to save images: {str(e)}")
 
 
 class OllamaPromptGenerator(QThread):
@@ -469,6 +1119,10 @@ Barcode at the bottom corner."""
         self.exit_btn.clicked.connect(self.close)
         button_layout.addWidget(self.exit_btn)
         
+        self.batch_mode_btn = QPushButton("📊 Batch Mode")
+        self.batch_mode_btn.clicked.connect(self.open_batch_mode)
+        button_layout.addWidget(self.batch_mode_btn)
+        
         layout.addLayout(button_layout)
         
         # Status box
@@ -779,6 +1433,11 @@ Barcode at the bottom corner."""
             except Exception as e:
                 self.log_error(f"Failed to save image: {str(e)}")
                 QMessageBox.critical(self, "Error", f"Failed to save image:\n{str(e)}")
+    
+    def open_batch_mode(self):
+        """Open batch mode dialog"""
+        dialog = BatchModeDialog(self)
+        dialog.exec()
 
 
 def main():
