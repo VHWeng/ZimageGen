@@ -14,6 +14,69 @@ A powerful PyQt6-based graphical interface for ComfyUI's Z-Image Turbo workflow,
 - 💾 **Smart Auto-naming**: Automatically name saved images based on your concept phrases
 - 🖼️ **Image Preview**: View generated images before saving
 - 📏 **Flexible Sizing**: Choose from presets or use aspect ratio calculator
+- 🔀 **Multi-Workflow Support**: Load and use any ComfyUI workflow JSON file
+- 📡 **Server Status**: Real-time ComfyUI server connection monitoring
+
+## Tested Workflows
+
+The GUI has been tested and verified to work with the following workflows:
+
+### ✅ Default: Z-Image Turbo (Built-in)
+- **Model**: z_image_turbo_bf16.safetensors
+- **Steps**: 4 (optimized for speed)
+- **Sampler**: res_multistep
+- **Features**: Ultra-fast generation, built-in workflow
+- **Best for**: Quick iterations, testing prompts
+- **File**: `image_z_image_turbo_t1.json`
+
+### ✅ FLUX Schnell
+- **Model**: flux1-schnell-fp8.safetensors
+- **Steps**: 4 (distilled model)
+- **Sampler**: euler
+- **CFG**: 1.0 (no negative prompt support)
+- **Features**: High-quality fast generation, modern architecture
+- **Best for**: High-quality results with minimal steps
+- **File**: `flux_quick.json`
+- **Note**: Negative prompts are ignored (CFG=1.0)
+
+### ✅ SDXL Turbo
+- **Model**: sd_xl_turbo_1.0_fp16.safetensors
+- **Steps**: 4
+- **Sampler**: euler_ancestral
+- **CFG**: 1.1
+- **Features**: SDXL quality with turbo speed
+- **Best for**: Balanced quality and speed with SDXL architecture
+- **File**: `SDXLturbo_Quick2.json`
+
+### ✅ Juggernaut XL
+- **Model**: juggernautXL_ragnarokBy.safetensors
+- **Steps**: 28 (high quality)
+- **Sampler**: dpmpp_2m
+- **Scheduler**: karras
+- **CFG**: 4.0
+- **Features**: High-quality photorealistic results
+- **Best for**: Detailed, photorealistic images (slower generation)
+- **File**: `JuggernautXL.json`
+
+### ✅ Qwen Image Rapid
+- **Model**: Qwen-Rapid-AIO-SFW-v8.safetensors
+- **Steps**: 4
+- **Sampler**: sa_solver
+- **Scheduler**: beta
+- **Features**: Custom text encoding with TextEncodeQwenImageEditPlus
+- **Best for**: Fast generation with Qwen architecture
+- **File**: `Qwen Image Rapid.json`
+- **Note**: Uses custom `prompt` field instead of `text`
+
+## Workflow Compatibility
+
+The GUI intelligently handles different workflow formats:
+- ✅ Standard ComfyUI workflows (CheckpointLoaderSimple)
+- ✅ Custom node types (TextEncodeQwenImageEditPlus, etc.)
+- ✅ Different text input fields (`text`, `prompt`, `string`)
+- ✅ Various latent image nodes (EmptyLatentImage, EmptySD3LatentImage)
+- ✅ Automatic filtering of UI-only nodes (Notes, MarkdownNote)
+- ✅ Smart detection of positive vs negative prompts
 
 ## Prerequisites
 
@@ -75,7 +138,9 @@ python main.py
 
 #### Download Required Models
 
-The Z-Image Turbo workflow requires these models:
+The GUI includes a built-in Z-Image Turbo workflow. For other workflows, download the appropriate models:
+
+**For Z-Image Turbo (Built-in):**
 
 1. **Text Encoder** (qwen_3_4b.safetensors)
    ```bash
@@ -98,6 +163,22 @@ The Z-Image Turbo workflow requires these models:
    https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors
    ```
 
+**For FLUX Schnell:**
+- Model: [flux1-schnell-fp8.safetensors](https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell-fp8.safetensors)
+- Location: `ComfyUI/models/checkpoints/`
+
+**For SDXL Turbo:**
+- Model: [sd_xl_turbo_1.0_fp16.safetensors](https://huggingface.co/stabilityai/sdxl-turbo)
+- Location: `ComfyUI/models/checkpoints/`
+
+**For Juggernaut XL:**
+- Model: [juggernautXL_ragnarokBy.safetensors](https://civitai.com/models/133005/juggernaut-xl)
+- Location: `ComfyUI/models/checkpoints/`
+
+**For Qwen Image Rapid:**
+- Model: Qwen-Rapid-AIO-SFW-v8.safetensors
+- Location: `ComfyUI/models/checkpoints/`
+
 #### Directory Structure
 
 After downloading, your ComfyUI directory should look like:
@@ -105,6 +186,11 @@ After downloading, your ComfyUI directory should look like:
 ```
 ComfyUI/
 ├── models/
+│   ├── checkpoints/
+│   │   ├── flux1-schnell-fp8.safetensors
+│   │   ├── sd_xl_turbo_1.0_fp16.safetensors
+│   │   ├── juggernautXL_ragnarokBy.safetensors
+│   │   └── Qwen-Rapid-AIO-SFW-v8.safetensors
 │   ├── text_encoders/
 │   │   └── qwen_3_4b.safetensors
 │   ├── diffusion_models/
@@ -172,16 +258,54 @@ If you want to use AI prompt generation:
    - Review the generated prompt
    - Click "Generate Image"
 
-3. **Customize image size**
+3. **Option C: Load a custom workflow**
+   - Click "📂 Load Workflow"
+   - Select a ComfyUI workflow JSON file
+   - Verify "✓ Custom Loaded" appears in green
+   - Enter your prompt and generate
+
+4. **Customize image size**
    - Select from preset sizes (512x512, 1024x1024, etc.)
    - Or choose aspect ratio + base size
 
-4. **Save the image**
+5. **Save the image**
    - Click "Save Image (JPG)"
    - Auto-generated filename: `phrase_0001.jpg`
 
-5. **Generate variations**
+6. **Generate variations**
    - Click "Re-Generate (New Seed)" for different versions
+
+### Using Custom Workflows
+
+The GUI supports loading any ComfyUI workflow:
+
+1. **Export workflow from ComfyUI**
+   - In ComfyUI, click "Save (API Format)" or export as JSON
+   - Save the workflow file
+
+2. **Load in GUI**
+   - Click "📂 Load Workflow"
+   - Select your workflow JSON file
+   - Check the status indicators:
+     - **🟢 Online** = ComfyUI server is running
+     - **✓ Custom Loaded** = Workflow loaded successfully
+     - **✗ Load Failed** = Check error messages
+
+3. **Generate with custom workflow**
+   - Your prompt will replace the positive prompt in the workflow
+   - Negative prompts are preserved
+   - Image dimensions are updated
+   - Seeds are randomized (or regenerated)
+
+4. **Reset to default**
+   - Click "🔄 Reset to Default" to return to Z-Image Turbo
+
+### Workflow Tips
+
+- **FLUX models**: Set CFG to 1.0, negative prompts are ignored
+- **Turbo models**: Use 4 steps for optimal speed/quality balance
+- **High-quality models** (Juggernaut): Use 20-30 steps, higher CFG
+- **Custom nodes**: The GUI automatically adapts to different text field names
 
 ### Batch Mode
 
@@ -268,6 +392,7 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 ### "Cannot connect to ComfyUI"
 - Ensure ComfyUI is running on port 8188
 - Check `http://127.0.0.1:8188` in your browser
+- Click "🔍 Check" button to verify server status
 - Restart ComfyUI if needed
 
 ### "Cannot connect to Ollama"
@@ -283,17 +408,40 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - Verify all models are downloaded to correct folders
 - Check ComfyUI console for error messages
 - Ensure model files are not corrupted
+- For custom workflows, verify the model name matches your file
+
+### "Workflow loaded but image not generated"
+- Check ComfyUI console for errors
+- Verify SaveImage node is present in workflow
+- Ensure all required models are installed
+- Check if workflow uses custom nodes (may need installation)
 
 ### Images not generating
 - Check ComfyUI is not frozen/crashed
 - Monitor ComfyUI console for errors
 - Verify GPU/CPU has enough memory
 - Try smaller image sizes (512x512)
+- Check if correct checkpoint/model is loaded
+
+### Workflow loading errors
+- **"Cannot execute because node X does not exist"**: Missing custom nodes
+- **"Required input is missing"**: GUI couldn't parse workflow correctly
+- **"Invalid workflow format"**: File may be corrupted or wrong format
+- Try exporting workflow as "API Format" from ComfyUI
+
+### Custom workflow issues
+- Use "Save (API Format)" when exporting from ComfyUI
+- Avoid workflows with UI-only nodes in critical paths
+- Check that text encode nodes use standard field names
+- Verify checkpoint names match your installed models
 
 ### Slow generation
-- Z-Image Turbo is fast (4 steps), but first generation loads models
+- Z-Image Turbo / FLUX Schnell: Fast (4 steps)
+- SDXL Turbo: Moderate (4 steps)
+- Juggernaut XL: Slow (28 steps)
+- First generation loads models (slower)
 - Subsequent generations should be much faster
-- Batch mode processes sequentially, so larger batches take time
+- Batch mode processes sequentially
 - Consider GPU upgrade for faster processing
 
 ## Tips and Best Practices
@@ -304,6 +452,13 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - Specify lighting: "golden hour", "studio lighting", "dramatic shadows"
 - Add technical details: "8K resolution", "cinematic composition"
 
+### Workflow Selection
+- **Quick testing**: Z-Image Turbo (4 steps, fastest)
+- **High quality + speed**: FLUX Schnell (4 steps, best balance)
+- **SDXL architecture**: SDXL Turbo (4 steps, SDXL quality)
+- **Photorealistic**: Juggernaut XL (28 steps, highest quality)
+- **Qwen architecture**: Qwen Rapid (4 steps, alternative fast option)
+
 ### Batch Processing
 - Start with small batches (10-20 items) to test
 - Keep prompts under 300 words for best results
@@ -311,16 +466,25 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - Monitor the status box for errors during batch processing
 
 ### Image Sizes
-- 512x512: Fastest, good for testing
-- 768x768: Balanced quality/speed
-- 1024x1024: Highest quality, slower
+- **512x512**: Fastest, good for testing
+- **768x768**: Balanced quality/speed
+- **1024x1024**: Highest quality, slower
 - Use aspect ratios for specific compositions (16:9 for landscapes, 9:16 for portraits)
+- Note: Some models work better at specific resolutions (SDXL prefers 1024x1024)
 
 ### Performance
 - Close other GPU-intensive applications
 - First generation is slower (model loading)
 - Batch mode: generates images sequentially
 - Use Re-Generate for quick variations
+- Turbo models (4 steps) are 5-7x faster than standard models (28+ steps)
+
+### Custom Workflows
+- Export workflows as "API Format" from ComfyUI
+- Test workflows in ComfyUI first before loading in GUI
+- Keep workflows simple for better compatibility
+- Avoid deeply nested or overly complex node structures
+- The GUI preserves negative prompts automatically
 
 ## File Outputs
 
@@ -355,8 +519,28 @@ For issues or questions:
 
 ### Version 1.0.0
 - Initial release
-- Single image generation
+- Single image generation with Z-Image Turbo
 - AI prompt generation with Ollama
-- Batch mode processing
-- Auto-naming and CSV export
+- Batch mode processing with CSV export
+- Auto-naming and image preview
 - Image size presets and aspect ratios
+- Multi-workflow support (load custom JSON workflows)
+- Real-time server status monitoring
+- Smart workflow parsing for different node types
+- Support for custom text encoding nodes
+- Automatic detection of positive/negative prompts
+- Tested with 5 different workflow types:
+  - Z-Image Turbo (default)
+  - FLUX Schnell
+  - SDXL Turbo
+  - Juggernaut XL
+  - Qwen Image Rapid
+
+## Known Limitations
+
+- Custom nodes must be installed in ComfyUI (not included in GUI)
+- Batch mode processes images sequentially (no parallel processing)
+- Maximum token size for Ollama prompts depends on model
+- Image preview shows scaled version (save for full resolution)
+- Workflow parsing is best-effort for complex/unusual workflows
+- Some workflow features (like ControlNet) may not be fully configurable via GUI
