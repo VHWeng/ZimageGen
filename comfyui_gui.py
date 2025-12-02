@@ -1091,6 +1091,10 @@ class WorkflowRunner(QThread):
             self.status.emit("Queuing prompt to ComfyUI...")
             prompt_data = {"prompt": workflow}
             
+            # Debug: Log the workflow structure
+            import json
+            self.status.emit(f"Sending workflow with {len(workflow)} nodes")
+            
             response = requests.post(
                 f"http://{self.server_address}/prompt",
                 json=prompt_data,
@@ -1112,6 +1116,12 @@ class WorkflowRunner(QThread):
             
             self.status.emit(f"Prompt queued (ID: {prompt_id}). Generating image...")
             
+            # Check for immediate errors
+            if 'error' in result:
+                self.error.emit(f"ComfyUI error: {result['error']}")
+                self.finished.emit(None)
+                return
+            
             # Poll for completion
             image_data = self.wait_for_completion(prompt_id)
             
@@ -1127,6 +1137,8 @@ class WorkflowRunner(QThread):
             self.finished.emit(None)
         except Exception as e:
             self.error.emit(f"Error: {str(e)}")
+            import traceback
+            self.error.emit(f"Traceback: {traceback.format_exc()}")
             self.finished.emit(None)
     
     def wait_for_completion(self, prompt_id, max_attempts=120):
@@ -1147,16 +1159,26 @@ class WorkflowRunner(QThread):
                     if prompt_id in history:
                         outputs = history[prompt_id].get('outputs', {})
                         
-                        # Look for SaveImage node output (node 9)
-                        if '9' in outputs:
-                            images = outputs['9'].get('images', [])
-                            if images:
-                                image_info = images[0]
-                                filename = image_info['filename']
-                                subfolder = image_info.get('subfolder', '')
-                                
-                                # Download the image
-                                return self.download_image(filename, subfolder)
+                        # Look for any SaveImage node output (try all node IDs)
+                        for node_id, node_output in outputs.items():
+                            if 'images' in node_output:
+                                images = node_output['images']
+                                if images:
+                                    image_info = images[0]
+                                    filename = image_info['filename']
+                                    subfolder = image_info.get('subfolder', '')
+                                    image_type = image_info.get('type', 'output')
+                                    
+                                    # Download the image
+                                    self.status.emit(f"Downloading generated image: {filename}")
+                                    return self.download_image(filename, subfolder, image_type)
+                        
+                        # If we got here, the prompt finished but no images found
+                        # Check if there was an error
+                        status = history[prompt_id].get('status', {})
+                        if status.get('completed', False) and not outputs:
+                            self.error.emit("Workflow completed but produced no images")
+                            return None
                 
                 time.sleep(2)  # Wait 2 seconds before checking again
                 
@@ -1164,15 +1186,18 @@ class WorkflowRunner(QThread):
                 self.status.emit(f"Polling error: {str(e)}")
                 time.sleep(2)
         
+        self.error.emit("Timeout waiting for image generation")
         return None
     
-    def download_image(self, filename, subfolder=''):
+    def download_image(self, filename, subfolder='', image_type='output'):
         """Download the generated image from ComfyUI"""
         try:
-            params = {'filename': filename}
+            params = {
+                'filename': filename,
+                'type': image_type
+            }
             if subfolder:
                 params['subfolder'] = subfolder
-            params['type'] = 'output'
             
             response = requests.get(
                 f"http://{self.server_address}/view",
@@ -1182,6 +1207,8 @@ class WorkflowRunner(QThread):
             
             if response.status_code == 200:
                 return response.content
+            else:
+                self.error.emit(f"Failed to download image: HTTP {response.status_code}")
             
         except Exception as e:
             self.error.emit(f"Failed to download image: {str(e)}")
