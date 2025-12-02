@@ -995,6 +995,9 @@ class WorkflowRunner(QThread):
                     # Map widgets to inputs based on common patterns
                     if node_type == 'CLIPTextEncode' and widgets:
                         inputs['text'] = widgets[0] if widgets else ""
+                    elif node_type == 'TextEncodeQwenImageEditPlus' and widgets:
+                        # Qwen custom node uses 'prompt' instead of 'text'
+                        inputs['prompt'] = widgets[0] if widgets else ""
                     elif node_type == 'KSampler' and len(widgets) >= 6:
                         inputs['seed'] = widgets[0]
                         inputs['steps'] = widgets[2]
@@ -1061,15 +1064,33 @@ class WorkflowRunner(QThread):
             class_type = node_data.get('class_type', '')
             
             # Update positive text prompts (look for common naming patterns)
-            if class_type in ['CLIPTextEncode', 'CLIPTextEncodeSDXL']:
+            # Handle different text input field names
+            text_encode_nodes = [
+                'CLIPTextEncode', 
+                'CLIPTextEncodeSDXL', 
+                'TextEncodeQwenImageEditPlus',
+                'CLIPTextEncodeFlux',
+                'ConditioningSetArea'
+            ]
+            
+            if class_type in text_encode_nodes:
+                # Try different field names
+                text_field = None
                 if 'text' in inputs:
+                    text_field = 'text'
+                elif 'prompt' in inputs:
+                    text_field = 'prompt'
+                elif 'string' in inputs:
+                    text_field = 'string'
+                
+                if text_field:
                     # Check if this is likely the positive prompt
-                    # (not the negative one which often has "negative" in title)
-                    current_text = inputs.get('text', '')
-                    # Only update if it seems like a positive prompt or is the first one
-                    if not any(neg_word in str(current_text).lower()[:100] 
-                              for neg_word in ['negative', 'worst', 'ugly', 'bad']):
-                        inputs['text'] = self.prompt_text
+                    current_text = inputs.get(text_field, '')
+                    if isinstance(current_text, str):
+                        # Only update if it seems like a positive prompt
+                        if not any(neg_word in str(current_text).lower()[:100] 
+                                  for neg_word in ['negative', 'worst', 'ugly', 'bad', 'watermark', 'text,']):
+                            inputs[text_field] = self.prompt_text
             
             # Update seed
             if 'seed' in inputs and isinstance(inputs['seed'], int):
