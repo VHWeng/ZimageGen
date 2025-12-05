@@ -244,6 +244,7 @@ class BatchModeDialog(QDialog):
         self.image_data = {}  # Store generated images by row index
         self.current_selected_row = -1
         self.active_workers = []  # Track active worker threads
+        self.loaded_file_path = None  # Store loaded file path for default save name
         self.init_ui()
     
     def init_ui(self):
@@ -265,7 +266,31 @@ class BatchModeDialog(QDialog):
         
         self.delimiter_combo = QComboBox()
         self.delimiter_combo.addItems(["Comma (,)", "Tab", "Semicolon (;)", "Pipe (|)"])
+        self.delimiter_combo.setCurrentText("Pipe (|)")  # Set default to Pipe
         file_layout.addWidget(self.delimiter_combo)
+        
+        file_layout.addSpacing(20)
+        
+        # Ollama model selection for batch mode
+        ollama_label = QLabel("Ollama Model:")
+        file_layout.addWidget(ollama_label)
+        
+        self.batch_ollama_combo = QComboBox()
+        self.batch_ollama_combo.setMinimumWidth(200)
+        file_layout.addWidget(self.batch_ollama_combo)
+        
+        # Populate with parent's models
+        if self.parent_window:
+            for i in range(self.parent_window.ollama_model_combo.count()):
+                model = self.parent_window.ollama_model_combo.itemText(i)
+                self.batch_ollama_combo.addItem(model)
+            # Set to same as parent's current selection
+            current_model = self.parent_window.ollama_model_combo.currentText()
+            self.batch_ollama_combo.setCurrentText(current_model)
+        
+        self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
+        self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
+        file_layout.addWidget(self.gen_prompts_btn)
         
         file_layout.addStretch()
         layout.addLayout(file_layout)
@@ -322,10 +347,6 @@ class BatchModeDialog(QDialog):
         # Control buttons
         button_layout = QHBoxLayout()
         
-        self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
-        self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
-        button_layout.addWidget(self.gen_prompts_btn)
-        
         self.process_batch_btn = QPushButton("🎨 Process Batch (Generate Images)")
         self.process_batch_btn.clicked.connect(self.process_batch)
         button_layout.addWidget(self.process_batch_btn)
@@ -337,6 +358,14 @@ class BatchModeDialog(QDialog):
         self.save_images_btn = QPushButton("💾 Save All Images")
         self.save_images_btn.clicked.connect(self.save_all_images)
         button_layout.addWidget(self.save_images_btn)
+        
+        self.save_zip_btn = QPushButton("📦 Save All as Zip")
+        self.save_zip_btn.clicked.connect(self.save_all_as_zip)
+        button_layout.addWidget(self.save_zip_btn)
+        
+        self.exit_batch_btn = QPushButton("❌ Exit")
+        self.exit_batch_btn.clicked.connect(self.close)
+        button_layout.addWidget(self.exit_batch_btn)
         
         button_layout.addStretch()
         
@@ -410,6 +439,7 @@ class BatchModeDialog(QDialog):
         
         if file_path:
             try:
+                self.loaded_file_path = file_path  # Store for default save name
                 delimiter = self.get_delimiter()
                 
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -476,7 +506,7 @@ class BatchModeDialog(QDialog):
             QMessageBox.warning(self, "Error", "Parent window not available!")
             return
         
-        model = self.parent_window.ollama_model_combo.currentText()
+        model = self.batch_ollama_combo.currentText()
         if model in ["(No models available)", "(Ollama not running)"]:
             QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
             return
@@ -699,11 +729,27 @@ class BatchModeDialog(QDialog):
             self.log_error(f"Failed to display preview: {str(e)}")
     
     def save_csv(self):
-        """Save updated CSV file"""
+        """Save updated CSV file to Output subdirectory with original filename"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "No data to save!")
+            return
+        
+        # Determine default filename and location
+        if self.loaded_file_path:
+            original_name = Path(self.loaded_file_path).stem
+            default_filename = f"{original_name}.csv"
+        else:
+            default_filename = "batch_output.csv"
+        
+        # Create Output subdirectory path
+        output_dir = Path.cwd() / "Output"
+        output_dir.mkdir(exist_ok=True)
+        default_path = output_dir / default_filename
+        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save CSV File",
-            "batch_output.csv",
+            str(default_path),
             "CSV Files (*.csv)"
         )
         
@@ -733,15 +779,18 @@ class BatchModeDialog(QDialog):
             QMessageBox.warning(self, "No Images", "No images to save!")
             return
         
-        output_dir = QFileDialog.getExistingDirectory(
+        # Default to Output subdirectory
+        output_dir = Path.cwd() / "Output"
+        
+        selected_dir = QFileDialog.getExistingDirectory(
             self,
             "Select Output Directory",
-            ""
+            str(output_dir)
         )
         
-        if output_dir:
+        if selected_dir:
             try:
-                output_path = Path(output_dir) / "Output"
+                output_path = Path(selected_dir) / "Output"
                 output_path.mkdir(exist_ok=True)
                 
                 saved_count = 0
@@ -771,6 +820,92 @@ class BatchModeDialog(QDialog):
                 
             except Exception as e:
                 self.log_error(f"Failed to save images: {str(e)}")
+    
+    def save_all_as_zip(self):
+        """Save all images and CSV to a zip file in Output subdirectory"""
+        if not self.image_data and self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "No images or data to save!")
+            return
+        
+        try:
+            import zipfile
+            from datetime import datetime
+            
+            # Determine default filename
+            if self.loaded_file_path:
+                original_name = Path(self.loaded_file_path).stem
+                default_filename = f"{original_name}_batch.zip"
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                default_filename = f"batch_output_{timestamp}.zip"
+            
+            # Create Output subdirectory
+            output_dir = Path.cwd() / "Output"
+            output_dir.mkdir(exist_ok=True)
+            default_path = output_dir / default_filename
+            
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Batch as Zip",
+                str(default_path),
+                "Zip Files (*.zip)"
+            )
+            
+            if file_path:
+                with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Save CSV data
+                    csv_data = io.StringIO()
+                    delimiter = self.get_delimiter()
+                    writer = csv.writer(csv_data, delimiter=delimiter)
+                    
+                    for row in range(self.table.rowCount()):
+                        row_data = []
+                        for col in range(4):
+                            item = self.table.item(row, col)
+                            row_data.append(item.text() if item else "")
+                        writer.writerow(row_data)
+                    
+                    # Add CSV to zip
+                    csv_filename = "batch_data.csv"
+                    zipf.writestr(csv_filename, csv_data.getvalue())
+                    
+                    # Save all images
+                    saved_count = 0
+                    for row_idx, image_data in self.image_data.items():
+                        filename = self.table.item(row_idx, 3).text() if self.table.item(row_idx, 3) else f"image_{row_idx:04d}"
+                        
+                        if not filename.endswith('.jpg'):
+                            filename += '.jpg'
+                        
+                        # Convert image
+                        image = Image.open(io.BytesIO(image_data))
+                        
+                        if image.mode in ('RGBA', 'LA', 'P'):
+                            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+                            if image.mode == 'P':
+                                image = image.convert('RGBA')
+                            rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+                            image = rgb_image
+                        
+                        # Save to bytes
+                        img_byte_arr = io.BytesIO()
+                        image.save(img_byte_arr, format='JPEG', quality=95)
+                        img_byte_arr.seek(0)
+                        
+                        # Add to zip
+                        zipf.writestr(f"images/{filename}", img_byte_arr.getvalue())
+                        saved_count += 1
+                    
+                    self.log_status(f"✓ Saved {saved_count} images and CSV to zip: {file_path}")
+                    QMessageBox.information(
+                        self, 
+                        "Success", 
+                        f"Saved batch to zip file:\n{file_path}\n\nContents:\n- CSV file\n- {saved_count} images"
+                    )
+                
+        except Exception as e:
+            self.log_error(f"Failed to create zip file: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to create zip file:\n{str(e)}")
 
 
 class OllamaPromptGenerator(QThread):
@@ -1503,8 +1638,21 @@ Barcode at the bottom corner."""
         # Load Ollama models on startup
         self.refresh_ollama_models()
         
+        # Set default model to kimi-k2:1t-cloud if available
+        QTimer.singleShot(1000, self.set_default_ollama_model)
+        
         # Check server status on startup
         QTimer.singleShot(500, self.check_server_status)  # Check after 500ms
+    
+    def set_default_ollama_model(self):
+        """Set default Ollama model to kimi-k2:1t-cloud"""
+        target_model = "kimi-k2:1t-cloud"
+        index = self.ollama_model_combo.findText(target_model)
+        if index >= 0:
+            self.ollama_model_combo.setCurrentIndex(index)
+            self.log_status(f"✓ Default model set to {target_model}")
+        else:
+            self.log_status(f"⚠ Default model '{target_model}' not found. Using first available model.")
     
     def load_custom_workflow(self):
         """Load a custom ComfyUI workflow file"""
