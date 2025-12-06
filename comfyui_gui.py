@@ -370,7 +370,62 @@ class BatchModeDialog(QDialog):
         self.workflow_filename_label.setMinimumWidth(200)
         button_layout.addWidget(self.workflow_filename_label)
         
-        button_layout.addSpacing(10)
+        button_layout.addSpacing(20)
+        
+        # Image size controls
+        size_label = QLabel("Image Size:")
+        button_layout.addWidget(size_label)
+        
+        self.batch_size_combo = QComboBox()
+        self.batch_size_presets = {
+            "512x512": (512, 512),
+            "768x768": (768, 768),
+            "1024x1024": (1024, 1024),
+            "512x768": (512, 768),
+            "768x1024": (768, 1024),
+            "768x512": (768, 512),
+            "1024x768": (1024, 768),
+            "1024x576": (1024, 576),
+            "576x1024": (576, 1024),
+        }
+        self.batch_size_combo.addItems(self.batch_size_presets.keys())
+        self.batch_size_combo.setCurrentText("512x512")
+        self.batch_size_combo.currentTextChanged.connect(self.on_batch_size_changed)
+        button_layout.addWidget(self.batch_size_combo)
+        
+        aspect_label = QLabel("Aspect:")
+        button_layout.addWidget(aspect_label)
+        
+        self.batch_aspect_combo = QComboBox()
+        self.batch_aspect_ratios = {
+            "1:1": (1, 1),
+            "4:3": (4, 3),
+            "3:4": (3, 4),
+            "16:9": (16, 9),
+            "9:16": (9, 16),
+            "3:2": (3, 2),
+            "2:3": (2, 3),
+        }
+        self.batch_aspect_combo.addItems(self.batch_aspect_ratios.keys())
+        self.batch_aspect_combo.setCurrentText("1:1")
+        self.batch_aspect_combo.currentTextChanged.connect(self.on_batch_aspect_changed)
+        button_layout.addWidget(self.batch_aspect_combo)
+        
+        base_size_label = QLabel("Base:")
+        button_layout.addWidget(base_size_label)
+        
+        self.batch_base_size_combo = QComboBox()
+        self.batch_base_size_combo.addItems(["512", "768", "1024"])
+        self.batch_base_size_combo.setCurrentText("512")
+        self.batch_base_size_combo.currentTextChanged.connect(self.on_batch_aspect_changed)
+        button_layout.addWidget(self.batch_base_size_combo)
+        
+        # Current dimensions display
+        self.batch_dimensions_label = QLabel("512x512")
+        self.batch_dimensions_label.setStyleSheet("QLabel { color: #0066cc; font-weight: bold; }")
+        button_layout.addWidget(self.batch_dimensions_label)
+        
+        button_layout.addSpacing(20)
         
         self.process_batch_btn = QPushButton("🎨 Process Batch (Generate Images)")
         self.process_batch_btn.clicked.connect(self.process_batch)
@@ -617,8 +672,8 @@ class BatchModeDialog(QDialog):
         
         self.log_status(f"Generating image for row {row + 1}: {filename}")
         
-        # Get dimensions from parent
-        width, height = self.parent_window.get_current_dimensions()
+        # Get dimensions from batch controls
+        width, height = self.get_batch_dimensions()
         
         # Use batch-specific workflow if loaded, otherwise use parent's
         custom_workflow = self.batch_custom_workflow if self.batch_custom_workflow else self.parent_window.custom_workflow
@@ -701,11 +756,14 @@ class BatchModeDialog(QDialog):
         self.set_busy(True)
         self.process_batch_btn.setEnabled(False)
         
-        # Get dimensions from parent
-        width, height = self.parent_window.get_current_dimensions()
+        # Get dimensions from batch controls
+        width, height = self.get_batch_dimensions()
         
         # Use batch-specific workflow if loaded, otherwise use parent's
         custom_workflow = self.batch_custom_workflow if self.batch_custom_workflow else self.parent_window.custom_workflow
+        
+        # Log batch settings
+        self.log_status(f"Starting batch with size {width}x{height}")
         
         # Start batch image generation
         self.batch_img_gen = BatchImageGenerator(batch_items, width, height, custom_workflow)
@@ -793,6 +851,63 @@ class BatchModeDialog(QDialog):
                     
             except Exception as e:
                 self.log_error(f"Failed to load workflow: {str(e)}")
+    
+    def on_batch_size_changed(self, size_text):
+        """Handle batch size preset selection"""
+        if size_text in self.batch_size_presets:
+            width, height = self.batch_size_presets[size_text]
+            self.batch_dimensions_label.setText(f"{width}x{height}")
+            
+            # Disable aspect ratio controls when using presets
+            self.batch_aspect_combo.setEnabled(False)
+            self.batch_base_size_combo.setEnabled(False)
+    
+    def on_batch_aspect_changed(self):
+        """Handle batch aspect ratio selection"""
+        aspect_text = self.batch_aspect_combo.currentText()
+        base_size = int(self.batch_base_size_combo.currentText())
+        
+        if aspect_text in self.batch_aspect_ratios:
+            ratio_w, ratio_h = self.batch_aspect_ratios[aspect_text]
+            
+            # Calculate dimensions based on aspect ratio
+            if ratio_w >= ratio_h:
+                width = base_size
+                height = int(base_size * ratio_h / ratio_w)
+            else:
+                height = base_size
+                width = int(base_size * ratio_w / ratio_h)
+            
+            # Round to nearest multiple of 8 (common requirement for diffusion models)
+            width = (width // 8) * 8
+            height = (height // 8) * 8
+            
+            self.batch_dimensions_label.setText(f"{width}x{height}")
+            
+            # Enable aspect ratio controls
+            self.batch_aspect_combo.setEnabled(True)
+            self.batch_base_size_combo.setEnabled(True)
+            
+            # Update size combo to show it's custom
+            self.batch_size_combo.blockSignals(True)
+            self.batch_size_combo.setCurrentIndex(-1)
+            self.batch_size_combo.blockSignals(False)
+    
+    def get_batch_dimensions(self):
+        """Get image dimensions from batch mode controls"""
+        # Parse from dimensions label
+        dims_text = self.batch_dimensions_label.text()
+        try:
+            parts = dims_text.split('x')
+            if len(parts) == 2:
+                width = int(parts[0])
+                height = int(parts[1])
+                return (width, height)
+        except:
+            pass
+        
+        # Fallback to default
+        return (512, 512)
     
     def save_csv(self):
         """Save updated CSV file to Output subdirectory with original filename"""
