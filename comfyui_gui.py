@@ -184,11 +184,12 @@ class BatchImageGenerator(QThread):
     progress = pyqtSignal(int, int)  # current, total
     image_generated = pyqtSignal(int, object)  # row_index, image_data
     
-    def __init__(self, batch_items, width=512, height=512):
+    def __init__(self, batch_items, width=512, height=512, custom_workflow=None):
         super().__init__()
         self.batch_items = batch_items  # List of (prompt, filename) tuples
         self.width = width
         self.height = height
+        self.custom_workflow = custom_workflow
     
     def run(self):
         """Generate images in batch"""
@@ -200,7 +201,12 @@ class BatchImageGenerator(QThread):
                 self.progress.emit(idx + 1, total)
                 
                 # Generate image using WorkflowRunner logic
-                worker = WorkflowRunner(prompt, width=self.width, height=self.height)
+                worker = WorkflowRunner(
+                    prompt, 
+                    width=self.width, 
+                    height=self.height,
+                    custom_workflow=self.custom_workflow
+                )
                 workflow = worker.load_workflow(self.width, self.height)
                 
                 prompt_data = {"prompt": workflow}
@@ -245,6 +251,8 @@ class BatchModeDialog(QDialog):
         self.current_selected_row = -1
         self.active_workers = []  # Track active worker threads
         self.loaded_file_path = None  # Store loaded file path for default save name
+        self.batch_custom_workflow = None  # Store batch-specific workflow
+        self.batch_workflow_path = None  # Store workflow file path
         self.init_ui()
     
     def init_ui(self):
@@ -294,6 +302,11 @@ class BatchModeDialog(QDialog):
         
         file_layout.addStretch()
         layout.addLayout(file_layout)
+        
+        # Display loaded filename above table
+        self.loaded_file_label = QLabel("No file loaded")
+        self.loaded_file_label.setStyleSheet("QLabel { color: #0066cc; font-weight: bold; margin: 5px 0; }")
+        layout.addWidget(self.loaded_file_label)
         
         # Main content area with image preview and table
         content_layout = QHBoxLayout()
@@ -346,6 +359,18 @@ class BatchModeDialog(QDialog):
         
         # Control buttons
         button_layout = QHBoxLayout()
+        
+        # Workflow loading section
+        self.load_workflow_batch_btn = QPushButton("📂 Load Workflow")
+        self.load_workflow_batch_btn.clicked.connect(self.load_batch_workflow)
+        button_layout.addWidget(self.load_workflow_batch_btn)
+        
+        self.workflow_filename_label = QLabel("Using parent workflow")
+        self.workflow_filename_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+        self.workflow_filename_label.setMinimumWidth(200)
+        button_layout.addWidget(self.workflow_filename_label)
+        
+        button_layout.addSpacing(10)
         
         self.process_batch_btn = QPushButton("🎨 Process Batch (Generate Images)")
         self.process_batch_btn.clicked.connect(self.process_batch)
@@ -448,7 +473,9 @@ class BatchModeDialog(QDialog):
                 
                 if data:
                     self.populate_table(data)
-                    self.log_status(f"✓ Loaded {len(data)} rows from {Path(file_path).name}")
+                    filename = Path(file_path).name
+                    self.loaded_file_label.setText(f"Loaded: {filename}")
+                    self.log_status(f"✓ Loaded {len(data)} rows from {filename}")
                 else:
                     self.log_error("File is empty")
                     
@@ -593,8 +620,16 @@ class BatchModeDialog(QDialog):
         # Get dimensions from parent
         width, height = self.parent_window.get_current_dimensions()
         
+        # Use batch-specific workflow if loaded, otherwise use parent's
+        custom_workflow = self.batch_custom_workflow if self.batch_custom_workflow else self.parent_window.custom_workflow
+        
         # Generate single image
-        worker = WorkflowRunner(prompt, width=width, height=height)
+        worker = WorkflowRunner(
+            prompt, 
+            width=width, 
+            height=height,
+            custom_workflow=custom_workflow
+        )
         worker.finished.connect(lambda img, r=row: self.on_single_image_generated(r, img))
         worker.error.connect(self.log_error)
         
@@ -669,8 +704,11 @@ class BatchModeDialog(QDialog):
         # Get dimensions from parent
         width, height = self.parent_window.get_current_dimensions()
         
+        # Use batch-specific workflow if loaded, otherwise use parent's
+        custom_workflow = self.batch_custom_workflow if self.batch_custom_workflow else self.parent_window.custom_workflow
+        
         # Start batch image generation
-        self.batch_img_gen = BatchImageGenerator(batch_items, width, height)
+        self.batch_img_gen = BatchImageGenerator(batch_items, width, height, custom_workflow)
         self.batch_img_gen.status.connect(self.log_status)
         self.batch_img_gen.error.connect(self.log_error)
         self.batch_img_gen.progress.connect(self.update_progress)
@@ -727,6 +765,34 @@ class BatchModeDialog(QDialog):
             
         except Exception as e:
             self.log_error(f"Failed to display preview: {str(e)}")
+    
+    def load_batch_workflow(self):
+        """Load a custom workflow for batch processing"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load ComfyUI Workflow for Batch",
+            "",
+            "JSON Files (*.json);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    workflow_data = json.load(f)
+                
+                # Validate workflow
+                if 'nodes' in workflow_data or 'prompt' in workflow_data or any(isinstance(v, dict) for v in workflow_data.values()):
+                    self.batch_custom_workflow = workflow_data
+                    self.batch_workflow_path = file_path
+                    filename = Path(file_path).name
+                    self.workflow_filename_label.setText(f"{filename}")
+                    self.workflow_filename_label.setStyleSheet("QLabel { color: #0066cc; font-weight: bold; }")
+                    self.log_status(f"✓ Batch workflow loaded: {filename}")
+                else:
+                    self.log_error("Invalid workflow format")
+                    
+            except Exception as e:
+                self.log_error(f"Failed to load workflow: {str(e)}")
     
     def save_csv(self):
         """Save updated CSV file to Output subdirectory with original filename"""
@@ -1487,6 +1553,7 @@ Barcode at the bottom corner."""
         
         self.workflow_path_label = QLabel("Default Z-Image Turbo")
         self.workflow_path_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
+        self.workflow_path_label.setMinimumWidth(200)
         workflow_layout.addWidget(self.workflow_path_label)
         
         self.load_workflow_btn = QPushButton("📂 Load Workflow")
@@ -1664,7 +1731,8 @@ Barcode at the bottom corner."""
         )
         
         if file_path:
-            self.log_status(f"Loading workflow: {Path(file_path).name}")
+            filename = Path(file_path).name
+            self.log_status(f"Loading workflow: {filename}")
             
             # Start workflow loader thread
             self.workflow_loader = WorkflowLoader(file_path, self.server_address)
@@ -1677,7 +1745,9 @@ Barcode at the bottom corner."""
         if success:
             self.custom_workflow = workflow_data
             self.workflow_loaded = True
-            self.workflow_path_label.setText(f"Custom: {message}")
+            filename = Path(self.workflow_path_label.text()).name if "/" in self.workflow_path_label.text() or "\\" in self.workflow_path_label.text() else message
+            self.workflow_path_label.setText(f"{filename}")
+            self.workflow_path_label.setStyleSheet("QLabel { color: #0066cc; font-weight: bold; }")
             self.workflow_status_label.setText("✓ Custom Loaded")
             self.workflow_status_label.setStyleSheet("QLabel { font-weight: bold; color: green; }")
             self.log_status(f"✓ {message}")
