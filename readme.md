@@ -1,4 +1,11 @@
-# ComfyUI Z-Image Turbo GUI
+### Batch Mode issues
+
+- **"No Ollama models"**: Install Ollama and pull a model, then refresh in batch dialog
+- **CSV won't load**: Check delimiter setting matches your file format
+- **Images not saving**: Ensure write permissions for Output directory
+- **Zip creation fails**: Check disk space and file permissions
+- **Wrong CSV format**: Use consistent delimiter throughout file
+- **Missing images in zip**: Ensure images were generated before creating zip# ComfyUI Z-Image Turbo GUI
 
 A powerful PyQt6-based graphical interface for ComfyUI's Z-Image Turbo workflow, featuring AI-powered prompt generation via Ollama and batch processing capabilities.
 
@@ -314,29 +321,43 @@ Process multiple images from a CSV file:
 1. **Click "📊 Batch Mode"**
 
 2. **Prepare your CSV file**
+   
+   Default delimiter is **Pipe (|)**:
+   ```
+   phrase|description
+   sunset mountains|warm golden hour colors
+   cyberpunk city|neon lights and rain
+   forest path|misty morning atmosphere
+   ```
+   
+   Or use other delimiters (Comma, Tab, Semicolon):
    ```csv
    phrase,description
    sunset mountains,warm golden hour colors
    cyberpunk city,neon lights and rain
-   forest path,misty morning atmosphere
    ```
 
-3. **Load the CSV**
-   - Click "📁 Load File"
-   - Select CSV delimiter
-   - Review/edit the spreadsheet
+3. **Load and configure**
+   - Click "📁 Load File" and select your CSV
+   - Select CSV delimiter (default: Pipe |)
+   - Choose Ollama model for prompt generation
+   - Review/edit the spreadsheet data
 
 4. **Generate prompts**
-   - Click "✨ Generate All Prompts"
+   - Click "✨ Generate All Prompts" (next to model selection)
    - Wait for AI to expand all phrases into detailed prompts
+   - Prompts appear in the "Image Prompt" column
 
 5. **Process batch**
    - Click "🎨 Process Batch (Generate Images)"
-   - Monitor progress indicator
+   - Monitor progress indicator (current/total)
+   - Watch status messages for any errors
 
 6. **Save results**
-   - Click "💾 Save CSV" to save updated CSV with prompts
-   - Click "💾 Save All Images" to export all JPGs to Output folder
+   - **💾 Save CSV**: Saves to `Output/` folder with original filename
+   - **💾 Save All Images**: Exports all JPGs to `Output/Output/` folder
+   - **📦 Save All as Zip**: Creates zip with CSV + all images in `Output/` folder
+   - **❌ Exit**: Close batch mode dialog
 
 ### CSV Format
 
@@ -346,7 +367,14 @@ Your CSV file should have these columns:
 |----------|----------|----------|----------|
 | Phrase/Word | Description (optional) | Image Prompt (auto-filled) | Filename (auto-filled) |
 
-Example:
+**Example with Pipe delimiter (|):**
+```
+sunset|warm colors||
+ocean waves|dramatic||
+mountain peak|snow covered||
+```
+
+**Example with Comma delimiter (,):**
 ```csv
 sunset,warm colors,,
 ocean waves,dramatic,,
@@ -357,7 +385,29 @@ The app will automatically:
 - Generate detailed prompts (column 3)
 - Create filenames like `sunset_0001`, `ocean_waves_0002` (column 4)
 
+### Batch Mode Features
+
+- **Individual Controls**: Each row has buttons to regenerate prompt or image
+- **Image Preview**: Click any row to see its generated image
+- **Flexible Delimiters**: Pipe (default), Comma, Tab, or Semicolon
+- **Model Selection**: Choose Ollama model per batch
+- **Smart Saving**: 
+  - CSV saves to `Output/` with original filename
+  - Images save to `Output/Output/` folder
+  - Zip creates single file with everything
+- **Progress Tracking**: Real-time status and error reporting
+
 ## Configuration
+
+### Default Settings
+
+The application includes these default configurations:
+
+- **Ollama Model**: `kimi-k2:1t-cloud` (auto-selected if available)
+- **CSV Delimiter**: Pipe (|) in batch mode
+- **Output Directory**: `Output/` subdirectory in current working directory
+- **Image Format**: JPEG with 95% quality
+- **Batch Zip Naming**: Original filename + `_batch.zip`
 
 ### ComfyUI Connection
 
@@ -452,6 +502,12 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - Specify lighting: "golden hour", "studio lighting", "dramatic shadows"
 - Add technical details: "8K resolution", "cinematic composition"
 
+### Ollama Model Selection
+- **Default**: `kimi-k2:1t-cloud` (auto-selected if available)
+- **Alternative models**: llama3.2, mistral, phi, etc.
+- **Batch mode**: Can use different model than main window
+- Install multiple models for flexibility: `ollama pull <model>`
+
 ### Workflow Selection
 - **Quick testing**: Z-Image Turbo (4 steps, fastest)
 - **High quality + speed**: FLUX Schnell (4 steps, best balance)
@@ -460,10 +516,13 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - **Qwen architecture**: Qwen Rapid (4 steps, alternative fast option)
 
 ### Batch Processing
-- Start with small batches (10-20 items) to test
+- **CSV Format**: Use Pipe (|) delimiter by default for better compatibility
+- **Test first**: Start with 5-10 items to verify workflow
+- **Monitor progress**: Watch status box for errors during generation
+- **Save incrementally**: Save CSV after prompt generation, before image processing
+- **Zip for backup**: Use "Save All as Zip" for complete backup with images and data
 - Keep prompts under 300 words for best results
 - Use descriptive phrases in column 1 for better auto-naming
-- Monitor the status box for errors during batch processing
 
 ### Image Sizes
 - **512x512**: Fastest, good for testing
@@ -471,6 +530,12 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - **1024x1024**: Highest quality, slower
 - Use aspect ratios for specific compositions (16:9 for landscapes, 9:16 for portraits)
 - Note: Some models work better at specific resolutions (SDXL prefers 1024x1024)
+
+### File Organization
+- **Output folder**: All batch files auto-save to `Output/` directory
+- **Naming**: CSV uses original filename, Zip adds `_batch` suffix
+- **Cleanup**: Regularly backup and clear Output folder for large batches
+- **Version control**: Zip files include both CSV and images for easy archiving
 
 ### Performance
 - Close other GPU-intensive applications
@@ -491,11 +556,41 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 ### Single Mode
 - Images saved as: `phrase_0001.jpg`, `phrase_0002.jpg`, etc.
 - Location: User-selected directory
+- Format: JPEG, 95% quality
 
 ### Batch Mode
-- CSV saved with prompts and filenames
-- All images saved to: `selected_directory/Output/`
-- Filenames from column 4 of spreadsheet
+
+#### CSV Files
+- **Location**: `Output/` subdirectory (auto-created)
+- **Filename**: Same as input file (e.g., `mydata.csv` → `Output/mydata.csv`)
+- **Format**: Same delimiter as input file (Pipe | by default)
+- **Contents**: Phrase, Description, Generated Prompt, Filename
+
+#### Images
+- **Location**: `Output/Output/` subdirectory
+- **Filenames**: From column 4 of spreadsheet (e.g., `sunset_0001.jpg`)
+- **Format**: JPEG, 95% quality
+
+#### Zip Archives
+- **Location**: `Output/` subdirectory
+- **Filename**: Input name + `_batch.zip` (e.g., `mydata_batch.zip`)
+- **Contents**:
+  - `batch_data.csv` - Complete data table
+  - `images/` folder - All generated images
+- **Compression**: ZIP_DEFLATED
+
+### Directory Structure After Batch Processing
+
+```
+YourProject/
+├── Output/
+│   ├── mydata.csv              # Saved CSV
+│   ├── mydata_batch.zip        # Complete batch archive
+│   └── Output/
+│       ├── sunset_0001.jpg     # Individual images
+│       ├── ocean_0002.jpg
+│       └── mountain_0003.jpg
+```
 
 ## License
 
@@ -535,6 +630,22 @@ For issues or questions:
   - SDXL Turbo
   - Juggernaut XL
   - Qwen Image Rapid
+
+### Version 1.1.0 (Latest)
+- **Default Ollama Model**: Auto-selects `kimi-k2:1t-cloud` if available
+- **Batch Mode Enhancements**:
+  - CSV delimiter default changed to Pipe (|)
+  - Added Ollama model selection dropdown in batch mode
+  - Moved "Generate All Prompts" button next to model selection
+  - CSV auto-saves to Output folder with original filename
+  - Added "Save All as Zip" button for complete batch archives
+  - Added Exit button to batch mode dialog
+  - Improved file organization with Output subdirectory
+- **Better File Management**:
+  - Smart default paths for all save operations
+  - Automatic Output directory creation
+  - Zip archives include CSV + all images
+  - Filename preservation for batch workflows
 
 ## Known Limitations
 
