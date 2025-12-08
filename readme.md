@@ -75,6 +75,17 @@ The GUI has been tested and verified to work with the following workflows:
 - **File**: `Qwen Image Rapid.json`
 - **Note**: Uses custom `prompt` field instead of `text`
 
+### ✅ NetaYume Lumina (Modified)
+- **Model**: NetaYumev35_pretrained_all_in_one.safetensors
+- **Steps**: 30
+- **Sampler**: res_multistep
+- **CFG**: 4.0
+- **Features**: High-quality anime-style generation, ModelSamplingAuraFlow
+- **Best for**: Anime and artistic illustrations
+- **File**: `image_netayume_lumina_t2i_mod.json`
+- **Note**: Requires simplified workflow without subgraphs
+- **Model Link**: [Download from HuggingFace](https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/main/NetaYumev35_pretrained_all_in_one.safetensors)
+
 ## Workflow Compatibility
 
 The GUI intelligently handles different workflow formats:
@@ -82,8 +93,16 @@ The GUI intelligently handles different workflow formats:
 - ✅ Custom node types (TextEncodeQwenImageEditPlus, etc.)
 - ✅ Different text input fields (`text`, `prompt`, `string`)
 - ✅ Various latent image nodes (EmptyLatentImage, EmptySD3LatentImage)
+- ✅ Model sampling nodes (ModelSamplingAuraFlow, ModelSamplingFlux)
 - ✅ Automatic filtering of UI-only nodes (Notes, MarkdownNote)
 - ✅ Smart detection of positive vs negative prompts
+- ⚠️ **Limited support for subgraphs** - workflows with nested subgraphs should be simplified
+
+### Unsupported Workflow Features
+- ❌ Complex subgraphs with UUID node types
+- ❌ Deeply nested custom node structures
+- ❌ Workflows requiring custom prompt formatters
+- ⚠️ Some advanced ControlNet configurations
 
 ## Prerequisites
 
@@ -182,9 +201,10 @@ The GUI includes a built-in Z-Image Turbo workflow. For other workflows, downloa
 - Model: [juggernautXL_ragnarokBy.safetensors](https://civitai.com/models/133005/juggernaut-xl)
 - Location: `ComfyUI/models/checkpoints/`
 
-**For Qwen Image Rapid:**
-- Model: Qwen-Rapid-AIO-SFW-v8.safetensors
+**For NetaYume Lumina:**
+- Model: [NetaYumev35_pretrained_all_in_one.safetensors](https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/main/NetaYumev35_pretrained_all_in_one.safetensors)
 - Location: `ComfyUI/models/checkpoints/`
+- **Note**: Use the modified workflow (`image_netayume_lumina_t2i_mod.json`) without subgraphs
 
 #### Directory Structure
 
@@ -197,7 +217,8 @@ ComfyUI/
 │   │   ├── flux1-schnell-fp8.safetensors
 │   │   ├── sd_xl_turbo_1.0_fp16.safetensors
 │   │   ├── juggernautXL_ragnarokBy.safetensors
-│   │   └── Qwen-Rapid-AIO-SFW-v8.safetensors
+│   │   ├── Qwen-Rapid-AIO-SFW-v8.safetensors
+│   │   └── NetaYumev35_pretrained_all_in_one.safetensors
 │   ├── text_encoders/
 │   │   └── qwen_3_4b.safetensors
 │   ├── diffusion_models/
@@ -514,6 +535,7 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - **SDXL architecture**: SDXL Turbo (4 steps, SDXL quality)
 - **Photorealistic**: Juggernaut XL (28 steps, highest quality)
 - **Qwen architecture**: Qwen Rapid (4 steps, alternative fast option)
+- **Anime style**: NetaYume Lumina (30 steps, anime/artistic)
 
 ### Batch Processing
 - **CSV Format**: Use Pipe (|) delimiter by default for better compatibility
@@ -631,7 +653,7 @@ For issues or questions:
   - Juggernaut XL
   - Qwen Image Rapid
 
-### Version 1.1.0 (Latest)
+### Version 1.1.0
 - **Default Ollama Model**: Auto-selects `kimi-k2:1t-cloud` if available
 - **Batch Mode Enhancements**:
   - CSV delimiter default changed to Pipe (|)
@@ -647,6 +669,28 @@ For issues or questions:
   - Zip archives include CSV + all images
   - Filename preservation for batch workflows
 
+### Version 1.2.0 (Latest)
+- **Enhanced Workflow Display**:
+  - Main window shows workflow filename next to Load Workflow button
+  - Batch mode displays loaded CSV filename above spreadsheet
+  - Batch mode has independent workflow loading
+  - Workflow filename shown in batch mode controls
+- **Batch Mode Image Controls**:
+  - Added image size presets dropdown
+  - Added aspect ratio calculator with base size
+  - Real-time dimension display
+  - Independent from main window settings
+- **Expanded Workflow Support**:
+  - Added support for ModelSamplingAuraFlow nodes
+  - Added support for ModelSamplingFlux nodes
+  - Better handling of model sampling parameters
+  - NetaYume Lumina workflow support (modified version)
+- **Workflow Compatibility**:
+  - 6 tested and verified workflows
+  - Subgraph detection and skipping
+  - Improved node type detection
+  - Better widget value mapping
+
 ## Known Limitations
 
 - Custom nodes must be installed in ComfyUI (not included in GUI)
@@ -655,3 +699,11 @@ For issues or questions:
 - Image preview shows scaled version (save for full resolution)
 - Workflow parsing is best-effort for complex/unusual workflows
 - Some workflow features (like ControlNet) may not be fully configurable via GUI
+- **Subgraph workflows**: Complex nested subgraphs are not fully supported
+  - Workflows using UUID-based subgraph nodes should be simplified
+  - Use standard ComfyUI nodes (CLIPTextEncode, etc.) instead
+  - Example: NetaYume Lumina requires modified workflow without subgraphs
+- **Model sampling nodes**: Supported types include:
+  - ModelSamplingAuraFlow (Z-Image Turbo, NetaYume Lumina)
+  - ModelSamplingFlux (FLUX models)
+  - Standard samplers (KSampler)
