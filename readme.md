@@ -16,6 +16,7 @@ A powerful PyQt6-based graphical interface for ComfyUI's Z-Image Turbo workflow,
 
 - 🎨 **Simple Image Generation**: Generate images from text prompts with customizable sizes and aspect ratios
 - 🤖 **AI Prompt Generation**: Use Ollama LLMs to expand simple phrases into detailed image prompts
+- 🎭 **Style Selection**: Choose from 42+ preset styles or define custom styles for consistent aesthetics
 - 🔄 **Re-generation**: Generate variations with different seeds while keeping the same prompt
 - 📊 **Batch Mode**: Process multiple images from CSV files with automated prompt generation
 - 💾 **Smart Auto-naming**: Automatically name saved images based on your concept phrases
@@ -282,6 +283,7 @@ If you want to use AI prompt generation:
 2. **Option B: Use AI prompt generation**
    - Enter a simple concept in "Concept/Phrase" (e.g., "sunset over mountains")
    - Select an Ollama model
+   - **Select a style** (Photorealistic, Oil Painting, Anime, etc.) or use Custom
    - Click "✨ Generate Prompt"
    - Review the generated prompt
    - Click "Generate Image"
@@ -362,11 +364,12 @@ Process multiple images from a CSV file:
    - Click "📁 Load File" and select your CSV
    - Select CSV delimiter (default: Pipe |)
    - Choose Ollama model for prompt generation
+   - **Select style** (applies to all prompts in batch)
    - Review/edit the spreadsheet data
 
 4. **Generate prompts**
-   - Click "✨ Generate All Prompts" (next to model selection)
-   - Wait for AI to expand all phrases into detailed prompts
+   - Click "✨ Generate All Prompts" (next to style selection)
+   - Wait for AI to expand all phrases into detailed prompts with chosen style
    - Prompts appear in the "Image Prompt" column
 
 5. **Process batch**
@@ -412,11 +415,58 @@ The app will automatically:
 - **Image Preview**: Click any row to see its generated image
 - **Flexible Delimiters**: Pipe (default), Comma, Tab, or Semicolon
 - **Model Selection**: Choose Ollama model per batch
+- **Style Consistency**: Apply one style to all images in batch
 - **Smart Saving**: 
   - CSV saves to `Output/` with original filename
   - Images save to `Output/Output/` folder
   - Zip creates single file with everything
 - **Progress Tracking**: Real-time status and error reporting
+
+## Style Selection
+
+The GUI includes 42+ preset styles organized into categories for consistent image generation:
+
+### Available Style Categories
+
+**Photographic & Realistic:**
+- Photorealistic, Cinematic Film Still, Analog Film, Film Noir
+- Portrait Photography, Food Photography, Macro Photography
+- Street Photography, Old Photograph (BW/Colorized)
+
+**Artistic & Painting:**
+- Oil Painting, Watercolor, Pencil Sketch (BW/Color)
+- Charcoal Drawing (BW/Color), Digital Painting
+- Surrealism, Impressionism
+
+**Graphic & Stylized:**
+- Illustration, Anime, Comic Book, Graphic Novel
+- Pixel Art, Vector Graphics, Flat Design
+
+**3D & Rendering:**
+- 3D Rendering, Octane Render/Unreal Engine
+- Lowpoly, Isometric, Blender Render
+
+**Genre & Aesthetic:**
+- Cyberpunk, Neonpunk, Steampunk, Fantasy, Sci-Fi
+- Art Deco, Art Nouveau, Minimalist, Vintage/Retro
+- Concept Art
+
+### Using Styles
+
+**In Main Window:**
+1. Select style from dropdown (default: Photorealistic)
+2. Or choose "Custom" and enter your own style description
+3. Style guides AI prompt generation for consistent results
+
+**In Batch Mode:**
+1. Select style before generating prompts
+2. One style applies to entire batch
+3. Creates consistent visual aesthetic across all images
+
+**Custom Styles:**
+- Select "Custom" from dropdown
+- Enter any style description (e.g., "Ukiyo-e woodblock print", "Studio Ghibli animation")
+- AI incorporates your custom style into prompts
 
 ## Configuration
 
@@ -425,6 +475,7 @@ The app will automatically:
 The application includes these default configurations:
 
 - **Ollama Model**: `kimi-k2:1t-cloud` (auto-selected if available)
+- **Style**: Photorealistic (for AI prompt generation)
 - **CSV Delimiter**: Pipe (|) in batch mode
 - **Output Directory**: `Output/` subdirectory in current working directory
 - **Image Format**: JPEG with 95% quality
@@ -519,15 +570,27 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 
 ### Prompt Engineering
 - Use Ollama to expand simple concepts into detailed prompts
+- **Select appropriate style** for your desired aesthetic
 - Include style keywords: "photorealistic", "anime", "oil painting"
 - Specify lighting: "golden hour", "studio lighting", "dramatic shadows"
 - Add technical details: "8K resolution", "cinematic composition"
+- **Style consistency**: Use same style across related images
 
 ### Ollama Model Selection
 - **Default**: `kimi-k2:1t-cloud` (auto-selected if available)
 - **Alternative models**: llama3.2, mistral, phi, etc.
 - **Batch mode**: Can use different model than main window
 - Install multiple models for flexibility: `ollama pull <model>`
+
+### Style Selection Tips
+- **Photography projects**: Use Photographic & Realistic styles
+- **Artistic rendering**: Choose from Artistic & Painting styles
+- **Comics/Animation**: Select Graphic & Stylized options
+- **Game assets**: Use 3D & Rendering styles
+- **Themed collections**: Genre & Aesthetic styles
+- **Consistency**: Keep same style for series of images
+- **Experimentation**: Try Custom styles for unique aesthetics
+- **Batch uniformity**: One style per batch creates cohesive sets
 
 ### Workflow Selection
 - **Quick testing**: Z-Image Turbo (4 steps, fastest)
@@ -690,6 +753,29 @@ For issues or questions:
   - Subgraph detection and skipping
   - Improved node type detection
   - Better widget value mapping
+
+### Version 1.3.0 (Latest)
+- **Style Selection System**:
+  - 42+ preset styles organized in 5 categories
+  - Photographic & Realistic (10 styles)
+  - Artistic & Painting (9 styles)
+  - Graphic & Stylized (7 styles)
+  - 3D & Rendering (5 styles)
+  - Genre & Aesthetic (11 styles)
+  - Custom style option for unlimited flexibility
+  - Visual group separators in dropdown
+  - Non-selectable category headers
+- **AI Prompt Enhancement**:
+  - Style-guided prompt generation
+  - Main window style selection
+  - Batch mode style consistency
+  - Custom style text input
+  - Context-aware AI instructions
+- **User Interface**:
+  - Organized style dropdown with categories
+  - Bold, gray category headers
+  - Clean visual hierarchy
+  - Default: Photorealistic style
 
 ## Known Limitations
 

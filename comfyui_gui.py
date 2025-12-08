@@ -92,10 +92,11 @@ class BatchPromptGenerator(QThread):
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)  # current, total
     
-    def __init__(self, batch_data, model, ollama_url="http://127.0.0.1:11434"):
+    def __init__(self, batch_data, model, style="", ollama_url="http://127.0.0.1:11434"):
         super().__init__()
         self.batch_data = batch_data  # List of (phrase, description) tuples
         self.model = model
+        self.style = style
         self.ollama_url = ollama_url
     
     def run(self):
@@ -117,9 +118,15 @@ class BatchPromptGenerator(QThread):
                         item["description"] = desc
                     items_json.append(item)
                 
-                system_prompt = """You are an expert at creating detailed image generation prompts.
+                # Build system prompt with style
+                style_instruction = ""
+                if self.style:
+                    style_instruction = f"\nAll prompts should be in the style of: {self.style}"
+                    style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+                
+                system_prompt = f"""You are an expert at creating detailed image generation prompts.
 For each item in the JSON array, create a detailed, vivid prompt suitable for an AI image generator.
-Include details about: style, composition, lighting, mood, colors, and technical aspects.
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}
 Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding a "prompt" field to each item."""
 
                 user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
@@ -262,6 +269,10 @@ class BatchModeDialog(QDialog):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
+        # Get style list from parent
+        self.style_list = self.parent_window.style_list if self.parent_window else ["Custom", "Photorealistic"]
+        self.style_separators = self.parent_window.style_separators if self.parent_window else set()
+        
         # File loading section
         file_layout = QHBoxLayout()
         
@@ -295,6 +306,36 @@ class BatchModeDialog(QDialog):
             # Set to same as parent's current selection
             current_model = self.parent_window.ollama_model_combo.currentText()
             self.batch_ollama_combo.setCurrentText(current_model)
+        
+        # Style selection
+        style_label = QLabel("Style:")
+        file_layout.addWidget(style_label)
+        
+        self.batch_style_combo = QComboBox()
+        self.batch_style_combo.addItems(self.style_list)
+        self.batch_style_combo.setCurrentText("Photorealistic")
+        self.batch_style_combo.setMinimumWidth(180)
+        self.batch_style_combo.currentTextChanged.connect(self.on_batch_style_changed)
+        
+        # Make separators non-selectable
+        for i in self.style_separators:
+            self.batch_style_combo.setItemData(i, 0, Qt.ItemDataRole.UserRole - 1)
+            model = self.batch_style_combo.model()
+            item = model.item(i)
+            if item:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setForeground(QColor("#888"))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+        
+        file_layout.addWidget(self.batch_style_combo)
+        
+        self.batch_custom_style_input = QLineEdit()
+        self.batch_custom_style_input.setPlaceholderText("Enter custom style...")
+        self.batch_custom_style_input.setMinimumWidth(150)
+        self.batch_custom_style_input.setEnabled(False)
+        file_layout.addWidget(self.batch_custom_style_input)
         
         self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
         self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
@@ -593,6 +634,14 @@ class BatchModeDialog(QDialog):
             QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
             return
         
+        # Get style
+        style = self.batch_style_combo.currentText()
+        if style == "Custom":
+            style = self.batch_custom_style_input.text().strip()
+            if not style:
+                QMessageBox.warning(self, "No Style", "Please enter a custom style or select a preset!")
+                return
+        
         # Collect batch data
         batch_data = []
         for row in range(self.table.rowCount()):
@@ -608,8 +657,8 @@ class BatchModeDialog(QDialog):
         self.set_busy(True)
         self.gen_prompts_btn.setEnabled(False)
         
-        # Start batch prompt generation
-        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model)
+        # Start batch prompt generation with style
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, style)
         self.batch_prompt_gen.status.connect(self.log_status)
         self.batch_prompt_gen.error.connect(self.log_error)
         self.batch_prompt_gen.progress.connect(self.update_progress)
@@ -851,6 +900,20 @@ class BatchModeDialog(QDialog):
                     
             except Exception as e:
                 self.log_error(f"Failed to load workflow: {str(e)}")
+    
+    def on_batch_style_changed(self, style_text):
+        """Handle batch style selection change"""
+        # If a separator was somehow selected, revert to previous valid selection
+        if style_text.startswith("───"):
+            self.batch_style_combo.setCurrentText("Photorealistic")
+            return
+        
+        if style_text == "Custom":
+            self.batch_custom_style_input.setEnabled(True)
+            self.batch_custom_style_input.setFocus()
+        else:
+            self.batch_custom_style_input.setEnabled(False)
+            self.batch_custom_style_input.clear()
     
     def on_batch_size_changed(self, size_text):
         """Handle batch size preset selection"""
@@ -1095,10 +1158,11 @@ class OllamaPromptGenerator(QThread):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     
-    def __init__(self, phrase, model, ollama_url="http://127.0.0.1:11434"):
+    def __init__(self, phrase, model, style="", ollama_url="http://127.0.0.1:11434"):
         super().__init__()
         self.phrase = phrase
         self.model = model
+        self.style = style
         self.ollama_url = ollama_url
     
     def run(self):
@@ -1106,9 +1170,15 @@ class OllamaPromptGenerator(QThread):
         try:
             self.status.emit(f"Generating prompt with {self.model}...")
             
-            system_prompt = """You are an expert at creating detailed image generation prompts. 
+            # Build system prompt with style
+            style_instruction = ""
+            if self.style:
+                style_instruction = f"\nThe image should be in the style of: {self.style}"
+                style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+            
+            system_prompt = f"""You are an expert at creating detailed image generation prompts. 
 Given a simple word or phrase, expand it into a detailed, vivid prompt suitable for an AI image generator.
-Include details about: style, composition, lighting, mood, colors, and technical aspects.
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}
 Keep the prompt under 300 words and make it descriptive and creative.
 Only return the image prompt, nothing else."""
 
@@ -1628,6 +1698,60 @@ class ComfyUIGUI(QMainWindow):
         self.workflow_loaded = False
         self.server_address = "127.0.0.1:8188"
         
+        # Style list from StyleList.txt with separators
+        self.style_list = [
+            "Custom",
+            "─── Photographic & Realistic ───",
+            "Photorealistic",
+            "Cinematic Film Still",
+            "Analog Film (35mm / Kodak / Fujifilm)",
+            "Film Noir",
+            "Portrait Photography",
+            "Food Photography",
+            "Macro Photography",
+            "Street Photography",
+            "Old Photograph BW",
+            "Old Photograph Colorized",
+            "─── Artistic & Painting ───",
+            "Oil Painting",
+            "Watercolor",
+            "BW Pencil Sketch",
+            "Color Pencil Sketch",
+            "BW Charcoal Drawing",
+            "Color Charcoal Drawing",
+            "Digital Painting",
+            "Surrealism",
+            "Impressionism",
+            "─── Graphic & Stylized ───",
+            "Illustration",
+            "Anime",
+            "Comic Book",
+            "Graphic Novel",
+            "Pixel Art",
+            "Vector Graphics",
+            "Flat Design",
+            "─── 3D & Rendering ───",
+            "3D Rendering",
+            "Octane Render / Unreal Engine",
+            "Lowpoly",
+            "Isometric",
+            "Blender Render",
+            "─── Genre & Aesthetic ───",
+            "Cyberpunk",
+            "Neonpunk",
+            "Steampunk",
+            "Fantasy",
+            "Sci-Fi",
+            "Art Deco",
+            "Art Nouveau",
+            "Minimalist",
+            "Vintage / Retro",
+            "Concept Art"
+        ]
+        
+        # Non-selectable separator indices
+        self.style_separators = {1, 12, 22, 30, 35}  # Indices of separator items
+        
         # Image size presets
         self.size_presets = {
             "512x512 (Square)": (512, 512),
@@ -1693,6 +1817,37 @@ class ComfyUIGUI(QMainWindow):
         self.refresh_models_btn = QPushButton("🔄 Update Models")
         self.refresh_models_btn.clicked.connect(self.refresh_ollama_models)
         ollama_controls_layout.addWidget(self.refresh_models_btn)
+        
+        # Style selection
+        style_label = QLabel("Style:")
+        ollama_controls_layout.addWidget(style_label)
+        
+        self.style_combo = QComboBox()
+        self.style_combo.addItems(self.style_list)
+        self.style_combo.setCurrentText("Photorealistic")
+        self.style_combo.setMinimumWidth(180)
+        self.style_combo.currentTextChanged.connect(self.on_style_changed)
+        
+        # Make separators non-selectable by styling them
+        for i in self.style_separators:
+            self.style_combo.setItemData(i, 0, Qt.ItemDataRole.UserRole - 1)  # Disable item
+            # Style the separator items
+            model = self.style_combo.model()
+            item = model.item(i)
+            if item:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setForeground(QColor("#888"))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+        
+        ollama_controls_layout.addWidget(self.style_combo)
+        
+        self.custom_style_input = QLineEdit()
+        self.custom_style_input.setPlaceholderText("Enter custom style...")
+        self.custom_style_input.setMinimumWidth(150)
+        self.custom_style_input.setEnabled(False)  # Disabled by default
+        ollama_controls_layout.addWidget(self.custom_style_input)
         
         self.generate_prompt_btn = QPushButton("✨ Generate Prompt")
         self.generate_prompt_btn.clicked.connect(self.generate_prompt_from_phrase)
@@ -1887,6 +2042,21 @@ Barcode at the bottom corner."""
         # Check server status on startup
         QTimer.singleShot(500, self.check_server_status)  # Check after 500ms
     
+    def on_style_changed(self, style_text):
+        """Handle style selection change"""
+        # If a separator was somehow selected, revert to previous valid selection
+        if style_text.startswith("───"):
+            # Find first non-separator item after Custom
+            self.style_combo.setCurrentText("Photorealistic")
+            return
+        
+        if style_text == "Custom":
+            self.custom_style_input.setEnabled(True)
+            self.custom_style_input.setFocus()
+        else:
+            self.custom_style_input.setEnabled(False)
+            self.custom_style_input.clear()
+    
     def set_default_ollama_model(self):
         """Set default Ollama model to kimi-k2:1t-cloud"""
         target_model = "kimi-k2:1t-cloud"
@@ -2009,6 +2179,14 @@ Barcode at the bottom corner."""
             QMessageBox.warning(self, "No Model", "Please install Ollama models first!\n\nExample: ollama pull llama3.2")
             return
         
+        # Get style
+        style = self.style_combo.currentText()
+        if style == "Custom":
+            style = self.custom_style_input.text().strip()
+            if not style:
+                QMessageBox.warning(self, "No Style", "Please enter a custom style or select a preset!")
+                return
+        
         # Store phrase for filename generation
         self.current_phrase = phrase
         
@@ -2020,8 +2198,8 @@ Barcode at the bottom corner."""
             self.prompt_generator.quit()
             self.prompt_generator.wait(1000)
         
-        # Create and start prompt generator thread
-        self.prompt_generator = OllamaPromptGenerator(phrase, model)
+        # Create and start prompt generator thread with style
+        self.prompt_generator = OllamaPromptGenerator(phrase, model, style)
         self.prompt_generator.status.connect(self.log_status)
         self.prompt_generator.error.connect(self.log_error)
         self.prompt_generator.finished.connect(self.on_prompt_generated)
