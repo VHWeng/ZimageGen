@@ -1269,6 +1269,9 @@ class WorkflowRunner(QThread):
         if 'nodes' in workflow:
             # Full workflow format with UI data - extract prompt
             nodes = workflow.get('nodes', [])
+            definitions = workflow.get('definitions', {})
+            subgraphs = definitions.get('subgraphs', []) if definitions else []
+            
             prompt_dict = {}
             
             # List of UI-only nodes that shouldn't be in the prompt
@@ -1283,6 +1286,13 @@ class WorkflowRunner(QThread):
                 
                 # Skip UI-only nodes
                 if node_type in ui_only_nodes:
+                    continue
+                
+                # Check if this is a subgraph node (UUID format)
+                if len(node_type) > 30 and '-' in node_type:
+                    # This is a subgraph reference - skip it for now
+                    # The workflow should still work with the base nodes
+                    self.status.emit(f"Skipping subgraph node: {node_id}")
                     continue
                 
                 # Create simplified prompt structure
@@ -1329,6 +1339,13 @@ class WorkflowRunner(QThread):
                         inputs['ckpt_name'] = widgets[0]
                     elif node_type == 'SaveImage' and widgets:
                         inputs['filename_prefix'] = widgets[0] if widgets else "ComfyUI"
+                    elif node_type == 'ModelSamplingAuraFlow' and widgets:
+                        inputs['shift'] = widgets[0] if widgets else 4.0
+                    elif node_type == 'ModelSamplingFlux' and widgets:
+                        inputs['max_shift'] = widgets[0] if widgets else 1.15
+                        inputs['base_shift'] = widgets[1] if len(widgets) > 1 else 0.5
+                        inputs['width'] = widgets[2] if len(widgets) > 2 else 1024
+                        inputs['height'] = widgets[3] if len(widgets) > 3 else 1024
                     
                     prompt_dict[node_id] = {
                         'inputs': inputs,
@@ -1369,6 +1386,50 @@ class WorkflowRunner(QThread):
             # Already in prompt format
             self.update_workflow_params(workflow, width, height)
             return workflow
+    
+    def expand_subgraph(self, parent_node, subgraph_id, subgraphs):
+        """Expand a subgraph node into its component nodes"""
+        try:
+            # Find the subgraph definition
+            subgraph_def = None
+            for sg in subgraphs:
+                if sg.get('id') == subgraph_id:
+                    subgraph_def = sg
+                    break
+            
+            if not subgraph_def:
+                return None
+            
+            # Get the nodes from the subgraph
+            sg_nodes = subgraph_def.get('nodes', [])
+            result = {}
+            
+            # For text encoding subgraphs, look for CLIPTextEncode nodes
+            for sg_node in sg_nodes:
+                node_type = sg_node.get('type', '')
+                node_id = str(sg_node.get('id', ''))
+                
+                if node_type == 'CLIPTextEncode':
+                    # This is the main text encode node
+                    inputs = {}
+                    widgets = sg_node.get('widgets_values', [])
+                    
+                    # Get text from parent node's widgets if available
+                    parent_widgets = parent_node.get('widgets_values', [])
+                    if parent_widgets:
+                        inputs['text'] = parent_widgets[0] if parent_widgets else ""
+                    elif widgets:
+                        inputs['text'] = widgets[0] if widgets else ""
+                    
+                    result[node_id] = {
+                        'inputs': inputs,
+                        'class_type': 'CLIPTextEncode'
+                    }
+            
+            return result if result else None
+            
+        except Exception as e:
+            return None
     
     def update_workflow_params(self, workflow, width, height):
         """Update workflow parameters (prompt, seed, dimensions)"""
