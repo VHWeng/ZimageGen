@@ -1,11 +1,3 @@
-### Batch Mode issues
-
-- **"No Ollama models"**: Install Ollama and pull a model, then refresh in batch dialog
-- **CSV won't load**: Check delimiter setting matches your file format
-- **Images not saving**: Ensure write permissions for Output directory
-- **Zip creation fails**: Check disk space and file permissions
-- **Wrong CSV format**: Use consistent delimiter throughout file
-- **Missing images in zip**: Ensure images were generated before creating zip# ComfyUI Z-Image Turbo GUI
 
 A powerful PyQt6-based graphical interface for ComfyUI's Z-Image Turbo workflow, featuring AI-powered prompt generation via Ollama and batch processing capabilities.
 
