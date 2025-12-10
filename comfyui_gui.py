@@ -678,32 +678,40 @@ class BatchModeDialog(QDialog):
         self.log_status(f"✓ Generated {len(prompts)} prompts")
     
     def regenerate_single_prompt(self, row):
-        """Regenerate prompt for a single row"""
-        phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
-        desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
-        
-        if not phrase:
-            QMessageBox.warning(self, "No Phrase", "Please enter a phrase first!")
-            return
-        
-        model = self.parent_window.ollama_model_combo.currentText()
-        if model in ["(No models available)", "(Ollama not running)"]:
-            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
-            return
-        
-        self.log_status(f"Regenerating prompt for row {row + 1}...")
-        
-        # Use single prompt generator
-        prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model)
-        prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
-        prompt_gen.error.connect(self.log_error)
-        
-        # Keep reference to prevent garbage collection
-        self.active_workers.append(prompt_gen)
-        prompt_gen.finished.connect(lambda: self.cleanup_worker(prompt_gen))
-        
-        prompt_gen.start()
-    
+            """Regenerate prompt for a single row"""
+            phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+            desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+            
+            if not phrase:
+                QMessageBox.warning(self, "No Phrase", "Please enter a phrase first!")
+                return
+            
+            model = self.batch_ollama_combo.currentText()
+            if model in ["(No models available)", "(Ollama not running)"]:
+                QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+                return
+            
+            # Get style from batch mode controls
+            style = self.batch_style_combo.currentText()
+            if style == "Custom":
+                style = self.batch_custom_style_input.text().strip()
+                if not style:
+                    QMessageBox.warning(self, "No Style", "Please enter a custom style or select a preset!")
+                    return
+            
+            self.log_status(f"Regenerating prompt for row {row + 1}...")
+            
+            # Use single prompt generator with style
+            prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model, style)
+            prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
+            prompt_gen.error.connect(self.log_error)
+            
+            # Keep reference to prevent garbage collection
+            self.active_workers.append(prompt_gen)
+            prompt_gen.finished.connect(lambda: self.cleanup_worker(prompt_gen))
+            
+            prompt_gen.start() 
+            
     def on_single_prompt_generated(self, row, prompt):
         """Handle single prompt generation"""
         if prompt:
