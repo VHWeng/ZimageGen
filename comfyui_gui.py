@@ -1083,13 +1083,27 @@ class BatchModeDialog(QDialog):
             import zipfile
             from datetime import datetime
             
+            # Get style name
+            style = self.batch_style_combo.currentText()
+            if style == "Custom":
+                style = self.batch_custom_style_input.text().strip()
+                if not style:
+                    style = "custom"
+            
+            # Clean style name: remove spaces and replace with underscores
+            clean_style = re.sub(r'[^\w\s-]', '', style)
+            clean_style = re.sub(r'[-\s]+', '_', clean_style).strip('_')
+            
             # Determine default filename
             if self.loaded_file_path:
                 original_name = Path(self.loaded_file_path).stem
-                default_filename = f"{original_name}_batch.zip"
+                # Clean original name: remove spaces and replace with underscores
+                clean_original = re.sub(r'[^\w\s-]', '', original_name)
+                clean_original = re.sub(r'[-\s]+', '_', clean_original).strip('_')
+                default_filename = f"{clean_original}_{clean_style}.zip"
             else:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                default_filename = f"batch_output_{timestamp}.zip"
+                default_filename = f"batch_output_{clean_style}_{timestamp}.zip"
             
             # Create Output subdirectory
             output_dir = Path.cwd() / "Output"
@@ -1158,7 +1172,6 @@ class BatchModeDialog(QDialog):
         except Exception as e:
             self.log_error(f"Failed to create zip file: {str(e)}")
             QMessageBox.critical(self, "Error", f"Failed to create zip file:\n{str(e)}")
-
 
 class OllamaPromptGenerator(QThread):
     """Thread to generate prompts using Ollama"""
