@@ -583,9 +583,10 @@ class BatchModeDialog(QDialog):
         self.table.setRowCount(len(data))
         
         for row_idx, row_data in enumerate(data):
-            # Column 0: Phrase
+            # Column 0: Phrase - trim leading/trailing spaces and normalize internal spaces
             phrase = row_data[0] if len(row_data) > 0 else ""
-            self.table.setItem(row_idx, 0, QTableWidgetItem(phrase))
+            phrase = ' '.join(phrase.split())  # Remove leading/trailing spaces and normalize to single spaces
+            self.table.setItem(row_idx, 0, QTableWidgetItem(phrase))  
             
             # Column 1: Description
             desc = row_data[1] if len(row_data) > 1 else ""
