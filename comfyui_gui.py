@@ -1768,6 +1768,7 @@ class ComfyUIGUI(QMainWindow):
             "Art Nouveau",
             "Minimalist",
             "Vintage / Retro",
+            "Vintage illustration",
             "Concept Art"
         ]
         
