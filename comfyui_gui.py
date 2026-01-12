@@ -92,11 +92,12 @@ class BatchPromptGenerator(QThread):
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)  # current, total
     
-    def __init__(self, batch_data, model, style="", ollama_url="http://127.0.0.1:11434"):
+    def __init__(self, batch_data, model, style="", language="Greek (el)", ollama_url="http://127.0.0.1:11434"):
         super().__init__()
         self.batch_data = batch_data  # List of (phrase, description) tuples
         self.model = model
         self.style = style
+        self.language = language
         self.ollama_url = ollama_url
     
     def run(self):
@@ -118,15 +119,19 @@ class BatchPromptGenerator(QThread):
                         item["description"] = desc
                     items_json.append(item)
                 
-                # Build system prompt with style
+                # Build system prompt with style and language
                 style_instruction = ""
                 if self.style:
                     style_instruction = f"\nAll prompts should be in the style of: {self.style}"
                     style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
                 
+                # Extract language code from selection (e.g., "Greek (el)" -> "el")
+                lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
+                language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
+                
                 system_prompt = f"""You are an expert at creating detailed image generation prompts.
 For each item in the JSON array, create a detailed, vivid prompt suitable for an AI image generator.
-Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}{language_instruction}
 Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding a "prompt" field to each item."""
 
                 user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
@@ -306,6 +311,28 @@ class BatchModeDialog(QDialog):
             # Set to same as parent's current selection
             current_model = self.parent_window.ollama_model_combo.currentText()
             self.batch_ollama_combo.setCurrentText(current_model)
+        
+        # Language selection
+        lang_label = QLabel("Language:")
+        file_layout.addWidget(lang_label)
+        
+        self.batch_language_combo = QComboBox()
+        self.batch_language_combo.addItems([
+            "Greek (el)",
+            "English (en)",
+            "Spanish (es)",
+            "French (fr)",
+            "German (de)",
+            "Italian (it)",
+            "Portuguese (pt)",
+            "Russian (ru)",
+            "Chinese (zh)",
+            "Japanese (ja)",
+            "Korean (ko)"
+        ])
+        self.batch_language_combo.setCurrentText("Greek (el)")  # Default to Greek
+        self.batch_language_combo.setMinimumWidth(120)
+        file_layout.addWidget(self.batch_language_combo)
         
         # Style selection
         style_label = QLabel("Style:")
@@ -658,8 +685,11 @@ class BatchModeDialog(QDialog):
         self.set_busy(True)
         self.gen_prompts_btn.setEnabled(False)
         
-        # Start batch prompt generation with style
-        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, style)
+        # Get selected language
+        language = self.batch_language_combo.currentText()
+        
+        # Start batch prompt generation with style and language
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, style, language)
         self.batch_prompt_gen.status.connect(self.log_status)
         self.batch_prompt_gen.error.connect(self.log_error)
         self.batch_prompt_gen.progress.connect(self.update_progress)
@@ -702,8 +732,11 @@ class BatchModeDialog(QDialog):
             
             self.log_status(f"Regenerating prompt for row {row + 1}...")
             
-            # Use single prompt generator with style
-            prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model, style)
+            # Get language from batch mode controls
+            language = self.batch_language_combo.currentText()
+            
+            # Use single prompt generator with style and language
+            prompt_gen = OllamaPromptGenerator(f"{phrase}. {desc}".strip(), model, style, language)
             prompt_gen.finished.connect(lambda p, r=row: self.on_single_prompt_generated(r, p))
             prompt_gen.error.connect(self.log_error)
             
@@ -1180,11 +1213,12 @@ class OllamaPromptGenerator(QThread):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     
-    def __init__(self, phrase, model, style="", ollama_url="http://127.0.0.1:11434"):
+    def __init__(self, phrase, model, style="", language="Greek (el)", ollama_url="http://127.0.0.1:11434"):
         super().__init__()
         self.phrase = phrase
         self.model = model
         self.style = style
+        self.language = language
         self.ollama_url = ollama_url
     
     def run(self):
@@ -1192,15 +1226,19 @@ class OllamaPromptGenerator(QThread):
         try:
             self.status.emit(f"Generating prompt with {self.model}...")
             
-            # Build system prompt with style
+            # Build system prompt with style and language
             style_instruction = ""
             if self.style:
                 style_instruction = f"\nThe image should be in the style of: {self.style}"
                 style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
             
+            # Extract language code from selection (e.g., "Greek (el)" -> "el")
+            lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
+            language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate the prompt in English."
+            
             system_prompt = f"""You are an expert at creating detailed image generation prompts. 
 Given a simple word or phrase, expand it into a detailed, vivid prompt suitable for an AI image generator.
-Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}{language_instruction}
 Keep the prompt under 300 words and make it descriptive and creative.
 Only return the image prompt, nothing else."""
 
@@ -1841,6 +1879,28 @@ class ComfyUIGUI(QMainWindow):
         self.refresh_models_btn.clicked.connect(self.refresh_ollama_models)
         ollama_controls_layout.addWidget(self.refresh_models_btn)
         
+        # Language selection
+        lang_label = QLabel("Language:")
+        ollama_controls_layout.addWidget(lang_label)
+        
+        self.language_combo = QComboBox()
+        self.language_combo.addItems([
+            "Greek (el)",
+            "English (en)",
+            "Spanish (es)",
+            "French (fr)",
+            "German (de)",
+            "Italian (it)",
+            "Portuguese (pt)",
+            "Russian (ru)",
+            "Chinese (zh)",
+            "Japanese (ja)",
+            "Korean (ko)"
+        ])
+        self.language_combo.setCurrentText("Greek (el)")  # Default to Greek
+        self.language_combo.setMinimumWidth(120)
+        ollama_controls_layout.addWidget(self.language_combo)
+        
         # Style selection
         style_label = QLabel("Style:")
         ollama_controls_layout.addWidget(style_label)
@@ -2221,8 +2281,11 @@ Barcode at the bottom corner."""
             self.prompt_generator.quit()
             self.prompt_generator.wait(1000)
         
-        # Create and start prompt generator thread with style
-        self.prompt_generator = OllamaPromptGenerator(phrase, model, style)
+        # Get selected language
+        language = self.language_combo.currentText()
+        
+        # Create and start prompt generator thread with style and language
+        self.prompt_generator = OllamaPromptGenerator(phrase, model, style, language)
         self.prompt_generator.status.connect(self.log_status)
         self.prompt_generator.error.connect(self.log_error)
         self.prompt_generator.finished.connect(self.on_prompt_generated)
