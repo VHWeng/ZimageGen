@@ -940,24 +940,37 @@ class BatchModeDialog(QDialog):
                 self.preview_image_label.setText("No image generated yet")
     
     def display_preview_image(self, image_data):
-        """Display image in preview area"""
+        """Display image in preview area (scaled for preview only, full resolution preserved for saving)"""
         try:
+            # Load the original full-resolution image
             image = Image.open(io.BytesIO(image_data))
             
+            # Convert to PNG format for display
             img_byte_arr = io.BytesIO()
             image.save(img_byte_arr, format='PNG')
             img_byte_arr.seek(0)
             
+            # Create QImage and QPixmap
             qimage = QImage.fromData(img_byte_arr.read())
             pixmap = QPixmap.fromImage(qimage)
             
+            # Scale for preview display (maintains full resolution in image_data for saving)
+            # Use the scroll area's viewport size minus padding for optimal scaling
+            preview_width = max(200, self.preview_scroll.viewport().width() - 20)
+            preview_height = max(200, self.preview_scroll.viewport().height() - 20)
+            
             scaled_pixmap = pixmap.scaled(
-                380, 380,
+                preview_width, preview_height,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             
+            # Display scaled preview
             self.preview_image_label.setPixmap(scaled_pixmap)
+            
+            # Show original dimensions in status for transparency
+            original_width, original_height = image.size
+            self.log_status(f"Preview scaled to fit ({preview_width}x{preview_height}), original: {original_width}x{original_height}")
             
         except Exception as e:
             self.log_error(f"Failed to display preview: {str(e)}")

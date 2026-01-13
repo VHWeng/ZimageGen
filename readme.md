@@ -793,7 +793,7 @@ For issues or questions:
 - Custom nodes must be installed in ComfyUI (not included in GUI)
 - Batch mode processes images sequentially (no parallel processing)
 - Maximum token size for Ollama prompts depends on model
-- Image preview shows scaled version (save for full resolution)
+- Image preview shows scaled version optimized for display (full resolution preserved for saving)
 - Workflow parsing is best-effort for complex/unusual workflows
 - Some workflow features (like ControlNet) may not be fully configurable via GUI
 - **Subgraph workflows**: Complex nested subgraphs are not fully supported
