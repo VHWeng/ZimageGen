@@ -132,7 +132,7 @@ class BatchPromptGenerator(QThread):
                 system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
 For each item in the JSON array, create:
 1. A detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
-2. The phonetic pronunciation using English symbols/phonetics
+2. The phonetic pronunciation using easy-to-read English phonetic respelling 
 
 Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding "prompt" and "pronunciation" fields to each item."""
 
