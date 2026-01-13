@@ -379,27 +379,29 @@ Process multiple images from a CSV file:
 
 Your CSV file should have these columns:
 
-| Column 1 | Column 2 | Column 3 | Column 4 |
-|----------|----------|----------|----------|
-| Phrase/Word | Description (optional) | Image Prompt (auto-filled) | Filename (auto-filled) |
+| Column 1 | Column 2 | Column 3 | Column 4 | Column 5 | Column 6 |
+|----------|----------|----------|----------|----------|----------|
+| Phrase/Word | Description (optional) | Pronunciation (auto-generated) | IPA (auto-generated) | Image Prompt (auto-filled) | Filename (auto-filled) |
 
 **Example with Pipe delimiter (|):**
 ```
-sunset|warm colors||
-ocean waves|dramatic||
-mountain peak|snow covered||
+sunset|warm colors|||photorealistic image of sunset with warm golden and orange colors|
+mountain peak|snow covered|||majestic snow-covered mountain peak under blue sky|
+ancient temple|mysterious|||mysterious ancient temple hidden in misty jungle|
 ```
 
 **Example with Comma delimiter (,):**
 ```csv
-sunset,warm colors,,
-ocean waves,dramatic,,
-mountain peak,snow covered,,
+sunset,warm colors,,,photorealistic image of sunset with warm golden and orange colors,
+ocean waves,dramatic,,,dramatic ocean waves crashing against rocky shore,
+mountain peak,snow covered,,,majestic snow-covered mountain peak under blue sky,
 ```
 
 The app will automatically:
-- Generate detailed prompts (column 3)
-- Create filenames like `sunset_0001`, `ocean_waves_0002` (column 4)
+- Generate detailed prompts (column 5)
+- Create filenames like `sunset_0001`, `ocean_waves_0002` (column 6)
+- Generate pronunciations in English phonetic spelling (column 3)
+- Generate IPA (International Phonetic Alphabet) symbols (column 4)
 
 ### Batch Mode Features
 
@@ -641,11 +643,11 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - **Location**: `Output/` subdirectory (auto-created)
 - **Filename**: Same as input file (e.g., `mydata.csv` → `Output/mydata.csv`)
 - **Format**: Same delimiter as input file (Pipe | by default)
-- **Contents**: Phrase, Description, Generated Prompt, Filename
+- **Contents**: Phrase, Description, Pronunciation, IPA, Generated Prompt, Filename
 
 #### Images
 - **Location**: `Output/Output/` subdirectory
-- **Filenames**: From column 4 of spreadsheet (e.g., `sunset_0001.jpg`)
+- **Filenames**: From column 6 of spreadsheet (e.g., `sunset_0001.jpg`)
 - **Format**: JPEG, 95% quality
 
 #### Zip Archives
@@ -746,7 +748,7 @@ For issues or questions:
   - Improved node type detection
   - Better widget value mapping
 
-### Version 1.3.0 (Latest)
+### Version 1.3.0
 - **Style Selection System**:
   - 42+ preset styles organized in 5 categories
   - Photographic & Realistic (10 styles)
@@ -768,6 +770,23 @@ For issues or questions:
   - Bold, gray category headers
   - Clean visual hierarchy
   - Default: Photorealistic style
+
+### Version 1.4.0 (Latest)
+- **Multilingual Support**:
+  - Added language selection dropdown in batch mode (Greek default)
+  - Language sent to AI for better prompt generation while keeping prompts in English
+  - Available languages: Greek, English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean
+- **Pronunciation Features**:
+  - Added Pronunciation column (column 3) with English phonetic spelling
+  - Added IPA column (column 4) with International Phonetic Alphabet symbols
+  - AI generates both pronunciation and IPA for each phrase/word
+  - Pronunciation data saved in CSV exports
+  - Columns auto-populated during batch processing
+- **Batch Mode Enhancements**:
+  - Table now has 8 columns (was 6)
+  - Improved column organization and labeling
+  - Better data consistency in exports
+  - Language dropdown added to main window as well
 
 ## Known Limitations
 

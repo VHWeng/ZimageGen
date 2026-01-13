@@ -1095,7 +1095,8 @@ class BatchModeDialog(QDialog):
                     
                     for row in range(self.table.rowCount()):
                         row_data = []
-                        for col in range(5):  # Only save first 5 columns
+                        # Save all 6 columns (Phrase, Description, Pronunciation, IPA, Image Prompt, Filename)
+                        for col in range(6):
                             item = self.table.item(row, col)
                             row_data.append(item.text() if item else "")
                         writer.writerow(row_data)
@@ -1128,7 +1129,7 @@ class BatchModeDialog(QDialog):
                 
                 saved_count = 0
                 for row_idx, image_data in self.image_data.items():
-                    filename = self.table.item(row_idx, 4).text() if self.table.item(row_idx, 4) else f"image_{row_idx:04d}"
+                    filename = self.table.item(row_idx, 5).text() if self.table.item(row_idx, 5) else f"image_{row_idx:04d}"
                     
                     if not filename.endswith('.jpg'):
                         filename += '.jpg'
@@ -1207,7 +1208,8 @@ class BatchModeDialog(QDialog):
                     
                     for row in range(self.table.rowCount()):
                         row_data = []
-                        for col in range(5):
+                        # Save all 6 columns (Phrase, Description, Pronunciation, IPA, Image Prompt, Filename)
+                        for col in range(6):
                             item = self.table.item(row, col)
                             row_data.append(item.text() if item else "")
                         writer.writerow(row_data)
@@ -1219,7 +1221,7 @@ class BatchModeDialog(QDialog):
                     # Save all images
                     saved_count = 0
                     for row_idx, image_data in self.image_data.items():
-                        filename = self.table.item(row_idx, 4).text() if self.table.item(row_idx, 4) else f"image_{row_idx:04d}"
+                        filename = self.table.item(row_idx, 5).text() if self.table.item(row_idx, 5) else f"image_{row_idx:04d}"
                         
                         if not filename.endswith('.jpg'):
                             filename += '.jpg'
