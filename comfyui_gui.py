@@ -420,18 +420,18 @@ class BatchModeDialog(QDialog):
             "Phrase/Word", "Description", "Pronunciation", "IPA", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
         ])
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        # Set all columns to Interactive first
+        for i in range(8):
+            self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        # Then specifically set Image Prompt column to Stretch
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 150)
         self.table.setColumnWidth(1, 150)
         self.table.setColumnWidth(2, 150)  # Pronunciation column
         self.table.setColumnWidth(3, 150)  # IPA column
-        self.table.setColumnWidth(4, 200)
-        self.table.setColumnWidth(5, 100)
-        self.table.setColumnWidth(6, 100)
+        self.table.setColumnWidth(4, 150)  # Image Prompt column
+        self.table.setColumnWidth(5, 100) # Filename column
         self.table.itemSelectionChanged.connect(self.on_row_selected)
         
         table_layout.addWidget(self.table)
