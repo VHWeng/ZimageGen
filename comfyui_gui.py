@@ -129,10 +129,12 @@ class BatchPromptGenerator(QThread):
                 lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
                 language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
                 
-                system_prompt = f"""You are an expert at creating detailed image generation prompts.
-For each item in the JSON array, create a detailed, vivid prompt suitable for an AI image generator.
-Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}{language_instruction}
-Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding a "prompt" field to each item."""
+                system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
+For each item in the JSON array, create:
+1. A detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
+2. The phonetic pronunciation using English symbols/phonetics
+
+Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding "prompt" and "pronunciation" fields to each item."""
 
                 user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
                 
@@ -161,7 +163,11 @@ Keep each prompt under 200 words. Return ONLY a JSON array with the same structu
                                 prompts_data = prompts_data['prompts']
                             
                             for item in prompts_data:
-                                results.append(item.get('prompt', ''))
+                                # Extract both prompt and pronunciation
+                                prompt = item.get('prompt', '')
+                                pronunciation = item.get('pronunciation', '')
+                                # Store as tuple (prompt, pronunciation)
+                                results.append((prompt, pronunciation))
                             
                             self.progress.emit(len(results), total_items)
                             
@@ -169,7 +175,8 @@ Keep each prompt under 200 words. Return ONLY a JSON array with the same structu
                             # Fallback: treat as text and split
                             self.error.emit(f"JSON parse error in batch {i//batch_size + 1}, using fallback")
                             for _ in batch:
-                                results.append(generated_text[:500] if generated_text else "")
+                                # Return tuple format (prompt, pronunciation)
+                                results.append((generated_text[:500] if generated_text else "", ""))
                     else:
                         self.error.emit(f"Batch {i//batch_size + 1} failed: {response.status_code}")
                         for _ in batch:
@@ -178,14 +185,16 @@ Keep each prompt under 200 words. Return ONLY a JSON array with the same structu
                 except Exception as e:
                     self.error.emit(f"Error in batch {i//batch_size + 1}: {str(e)}")
                     for _ in batch:
-                        results.append("")
+                        # Return tuple format (prompt, pronunciation)
+                        results.append(("", ""))
             
             self.status.emit("✓ Batch prompt generation completed!")
             self.finished.emit(results)
             
         except Exception as e:
             self.error.emit(f"Batch generation error: {str(e)}")
-            self.finished.emit([])
+            # Return list of tuples (prompt, pronunciation)
+            self.finished.emit([("", "") for _ in self.batch_data])
 
 
 class BatchImageGenerator(QThread):
@@ -404,9 +413,9 @@ class BatchModeDialog(QDialog):
         table_layout.addWidget(table_label)
         
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "Phrase/Word", "Description", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
+            "Phrase/Word", "Description", "Pronunciation", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
         ])
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
@@ -415,9 +424,11 @@ class BatchModeDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 150)
         self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(2, 150)  # Pronunciation column
         self.table.setColumnWidth(3, 200)
         self.table.setColumnWidth(4, 100)
         self.table.setColumnWidth(5, 100)
+        self.table.setColumnWidth(6, 100)
         self.table.itemSelectionChanged.connect(self.on_row_selected)
         
         table_layout.addWidget(self.table)
@@ -619,26 +630,30 @@ class BatchModeDialog(QDialog):
             desc = row_data[1] if len(row_data) > 1 else ""
             self.table.setItem(row_idx, 1, QTableWidgetItem(desc))
             
-            # Column 2: Prompt
-            prompt = row_data[2] if len(row_data) > 2 else ""
-            self.table.setItem(row_idx, 2, QTableWidgetItem(prompt))
+            # Column 2: Pronunciation (auto-generated or loaded)
+            pronunciation = row_data[2] if len(row_data) > 2 else ""
+            self.table.setItem(row_idx, 2, QTableWidgetItem(pronunciation))
             
-            # Column 3: Filename (auto-generate if empty)
-            if len(row_data) > 3 and row_data[3]:
-                filename = row_data[3]
+            # Column 3: Prompt
+            prompt = row_data[3] if len(row_data) > 3 else ""
+            self.table.setItem(row_idx, 3, QTableWidgetItem(prompt))
+            
+            # Column 4: Filename (auto-generate if empty)
+            if len(row_data) > 4 and row_data[4]:
+                filename = row_data[4]
             else:
                 filename = self.generate_filename(phrase, row_idx)
-            self.table.setItem(row_idx, 3, QTableWidgetItem(filename))
+            self.table.setItem(row_idx, 4, QTableWidgetItem(filename))
             
-            # Column 4: Regen Prompt button
+            # Column 5: Regen Prompt button
             regen_prompt_btn = QPushButton("🔄")
             regen_prompt_btn.clicked.connect(lambda checked, r=row_idx: self.regenerate_single_prompt(r))
-            self.table.setCellWidget(row_idx, 4, regen_prompt_btn)
+            self.table.setCellWidget(row_idx, 5, regen_prompt_btn)
             
-            # Column 5: Regen Image button
+            # Column 6: Regen Image button
             regen_image_btn = QPushButton("🎨")
             regen_image_btn.clicked.connect(lambda checked, r=row_idx: self.regenerate_single_image(r))
-            self.table.setCellWidget(row_idx, 5, regen_image_btn)
+            self.table.setCellWidget(row_idx, 6, regen_image_btn)
     
     def generate_filename(self, phrase, index):
         """Generate filename from phrase and index"""
@@ -696,17 +711,33 @@ class BatchModeDialog(QDialog):
         self.batch_prompt_gen.finished.connect(self.on_batch_prompts_generated)
         self.batch_prompt_gen.start()
     
-    def on_batch_prompts_generated(self, prompts):
+    def on_batch_prompts_generated(self, prompt_data):
         """Handle batch prompt generation completion"""
         self.gen_prompts_btn.setEnabled(True)
         self.set_busy(False)
         
-        # Update table with generated prompts
-        for row_idx, prompt in enumerate(prompts):
+        # Update table with generated prompts and pronunciations
+        generated_count = 0
+        for row_idx, data in enumerate(prompt_data):
             if row_idx < self.table.rowCount():
-                self.table.setItem(row_idx, 2, QTableWidgetItem(prompt))
+                if isinstance(data, tuple) and len(data) == 2:
+                    prompt, pronunciation = data
+                else:
+                    # Handle legacy format
+                    prompt = data if isinstance(data, str) else ""
+                    pronunciation = ""
+                
+                # Set Image Prompt (column 3)
+                self.table.setItem(row_idx, 3, QTableWidgetItem(prompt))
+                
+                # Set Pronunciation (column 2) if not already populated
+                if not self.table.item(row_idx, 2) or not self.table.item(row_idx, 2).text().strip():
+                    self.table.setItem(row_idx, 2, QTableWidgetItem(pronunciation))
+                
+                if prompt or pronunciation:
+                    generated_count += 1
         
-        self.log_status(f"✓ Generated {len(prompts)} prompts")
+        self.log_status(f"✓ Generated {generated_count} prompts and pronunciations")
     
     def regenerate_single_prompt(self, row):
             """Regenerate prompt for a single row"""
@@ -749,13 +780,13 @@ class BatchModeDialog(QDialog):
     def on_single_prompt_generated(self, row, prompt):
         """Handle single prompt generation"""
         if prompt:
-            self.table.setItem(row, 2, QTableWidgetItem(prompt))
+            self.table.setItem(row, 3, QTableWidgetItem(prompt))
             self.log_status(f"✓ Prompt regenerated for row {row + 1}")
     
     def regenerate_single_image(self, row):
         """Regenerate image for a single row"""
-        prompt = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
-        filename = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+        prompt = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+        filename = self.table.item(row, 4).text() if self.table.item(row, 4) else ""
         
         if not prompt:
             QMessageBox.warning(self, "No Prompt", "Please generate a prompt first!")
@@ -831,11 +862,11 @@ class BatchModeDialog(QDialog):
             QMessageBox.warning(self, "No Data", "Please load a file first!")
             return
         
-        # Collect batch items
+        # Collect batch items (prompt is now in column 3)
         batch_items = []
         for row in range(self.table.rowCount()):
-            prompt = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
-            filename = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+            prompt = self.table.item(row, 3).text() if self.table.item(row, 3) else ""
+            filename = self.table.item(row, 4).text() if self.table.item(row, 4) else ""
             
             if prompt:
                 batch_items.append((prompt, filename))
@@ -1081,7 +1112,7 @@ class BatchModeDialog(QDialog):
                 
                 saved_count = 0
                 for row_idx, image_data in self.image_data.items():
-                    filename = self.table.item(row_idx, 3).text() if self.table.item(row_idx, 3) else f"image_{row_idx:04d}"
+                    filename = self.table.item(row_idx, 4).text() if self.table.item(row_idx, 4) else f"image_{row_idx:04d}"
                     
                     if not filename.endswith('.jpg'):
                         filename += '.jpg'
@@ -1172,7 +1203,7 @@ class BatchModeDialog(QDialog):
                     # Save all images
                     saved_count = 0
                     for row_idx, image_data in self.image_data.items():
-                        filename = self.table.item(row_idx, 3).text() if self.table.item(row_idx, 3) else f"image_{row_idx:04d}"
+                        filename = self.table.item(row_idx, 4).text() if self.table.item(row_idx, 4) else f"image_{row_idx:04d}"
                         
                         if not filename.endswith('.jpg'):
                             filename += '.jpg'
