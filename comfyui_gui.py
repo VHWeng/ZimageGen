@@ -85,6 +85,163 @@ class ServerStatusChecker(QThread):
         self.running = False
 
 
+class EnhancedOllamaPromptGenerator(QThread):
+    """Thread to generate prompts with pronunciation and IPA using Ollama JSON mode"""
+    finished = pyqtSignal(tuple)  # Emits (prompt, pronunciation, ipa)
+    error = pyqtSignal(str)
+    status = pyqtSignal(str)
+    
+    def __init__(self, phrase, model, style="", language="Greek (el)", ollama_url="http://127.0.0.1:11434"):
+        super().__init__()
+        self.phrase = phrase
+        self.model = model
+        self.style = style
+        self.language = language
+        self.ollama_url = ollama_url
+    
+    def run(self):
+        """Generate prompt, pronunciation, and IPA using Ollama JSON mode"""
+        try:
+            self.status.emit(f"Generating prompt with {self.model} (enhanced mode)...")
+            
+            # Build system prompt with style and language for single item
+            style_instruction = ""
+            if self.style:
+                style_instruction = f"\nAll prompts should be in the style of: {self.style}"
+                style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+            
+            # Extract language code from selection (e.g., "Greek (el)" -> "el")
+            lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
+            language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
+            
+            system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
+For the given item, create:
+1. A detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
+2. The phonetic pronunciation using easy-to-read English phonetic respelling 
+3. IPA, phonetic pronunciation using IPA symbols
+
+Keep the prompt under 200 words. Return ONLY a JSON object with "prompt", "pronunciation", and "ipa" fields."""
+
+            user_prompt = f"Create a detailed image generation prompt for this item:\n{{\"phrase\": \"{self.phrase}\"}}"
+            
+            try:
+                response = requests.post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": self.model,
+                        "prompt": f"{system_prompt}\n\n{user_prompt}",
+                        "stream": False,
+                        "format": "json"
+                    },
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    generated_text = result.get('response', '').strip()
+                    
+                    # Parse JSON response with robust error handling
+                    try:
+                        prompt_data = json.loads(generated_text)
+                        
+                        # Extract prompt, pronunciation, and IPA
+                        prompt = prompt_data.get('prompt', '')
+                        pronunciation = prompt_data.get('pronunciation', '')
+                        ipa = prompt_data.get('ipa', '')
+                        
+                        # Validate that we got meaningful data
+                        if prompt and len(prompt) > 10:
+                            self.status.emit("✓ Enhanced prompt generated successfully!")
+                            self.finished.emit((prompt, pronunciation, ipa))
+                        else:
+                            # Fallback to basic prompt generation
+                            self.status.emit("JSON parsing failed, using fallback method...")
+                            fallback_prompt = self._generate_fallback_prompt()
+                            self.finished.emit((fallback_prompt, "", ""))
+                            
+                    except json.JSONDecodeError:
+                        # Fallback: try to extract data from text response
+                        self.status.emit("JSON decode error, attempting text parsing...")
+                        fallback_prompt = self._extract_prompt_from_text(generated_text)
+                        self.finished.emit((fallback_prompt, "", ""))
+                        
+                else:
+                    self.error.emit(f"Ollama error: {response.status_code} - {response.text}")
+                    # Fallback to basic prompt generation
+                    fallback_prompt = self._generate_fallback_prompt()
+                    self.finished.emit((fallback_prompt, "", ""))
+                    
+            except requests.exceptions.RequestException as e:
+                self.error.emit(f"Network error: {str(e)}")
+                # Fallback to basic prompt generation
+                fallback_prompt = self._generate_fallback_prompt()
+                self.finished.emit((fallback_prompt, "", ""))
+            except Exception as e:
+                self.error.emit(f"Error in enhanced generation: {str(e)}")
+                # Fallback to basic prompt generation
+                fallback_prompt = self._generate_fallback_prompt()
+                self.finished.emit((fallback_prompt, "", ""))
+                
+        except Exception as e:
+            self.error.emit(f"Critical error in enhanced prompt generation: {str(e)}")
+            # Ultimate fallback
+            fallback_prompt = self._generate_fallback_prompt()
+            self.finished.emit((fallback_prompt, "", ""))
+    
+    def _generate_fallback_prompt(self):
+        """Generate basic prompt when JSON method fails"""
+        try:
+            # Use the original OllamaPromptGenerator logic as fallback
+            style_instruction = ""
+            if self.style:
+                style_instruction = f"\nThe image should be in the style of: {self.style}"
+                style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+            
+            language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate the prompt in English."
+            
+            system_prompt = f"""You are an expert at creating detailed image generation prompts. 
+Given a simple word or phrase, expand it into a detailed, vivid prompt suitable for an AI image generator.
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}{language_instruction}
+Keep the prompt under 300 words and make it descriptive and creative.
+Only return the image prompt, nothing else."""
+
+            user_prompt = f"Create a detailed image generation prompt based on this concept: {self.phrase}"
+            
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{system_prompt}\n\n{user_prompt}",
+                    "stream": False
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('response', '').strip()
+            else:
+                return f"A detailed image of {self.phrase}"
+                
+        except Exception:
+            return f"A detailed image of {self.phrase}"
+    
+    def _extract_prompt_from_text(self, text):
+        """Attempt to extract prompt from non-JSON text response"""
+        if not text:
+            return f"A detailed image of {self.phrase}"
+        
+        # Look for common prompt indicators
+        lines = text.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('{') and not line.endswith('}') and len(line) > 20:
+                return line
+        
+        # If no suitable line found, return the whole text (truncated)
+        return text[:500] if len(text) > 500 else text
+
+
 class BatchPromptGenerator(QThread):
     """Thread to generate multiple prompts in batch using Ollama JSON mode"""
     finished = pyqtSignal(list)  # Emits list of generated prompts
