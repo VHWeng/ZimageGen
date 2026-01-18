@@ -39,6 +39,17 @@ The GUI has been tested and verified to work with the following workflows:
 - **File**: `flux_quick.json`
 - **Note**: Negative prompts are ignored (CFG=1.0)
 
+### ✅ FLUX Klein Distilled
+- **Model**: flux2_klein_distilled_bf16.safetensors
+- **Steps**: 16
+- **Sampler**: dpmpp_2m_sde_gpu
+- **Scheduler**: karras
+- **CFG**: 1.0 (no negative prompt support)
+- **Features**: High-quality fast generation, distilled model
+- **Best for**: Very fast, high-quality results with the Flux architecture
+- **File**: `flux2_klein_distilled.json`
+- **Note**: Negative prompts are ignored (CFG=1.0)
+
 ### ✅ SDXL Turbo
 - **Model**: sd_xl_turbo_1.0_fp16.safetensors
 - **Steps**: 4
@@ -208,6 +219,7 @@ ComfyUI/
 ├── models/
 │   ├── checkpoints/
 │   │   ├── flux1-schnell-fp8.safetensors
+│   │   ├── flux2_klein_distilled_bf16.safetensors
 │   │   ├── sd_xl_turbo_1.0_fp16.safetensors
 │   │   ├── juggernautXL_ragnarokBy.safetensors
 │   │   ├── Qwen-Rapid-AIO-SFW-v8.safetensors
@@ -801,6 +813,6 @@ For issues or questions:
   - Use standard ComfyUI nodes (CLIPTextEncode, etc.) instead
   - Example: NetaYume Lumina requires modified workflow without subgraphs
 - **Model sampling nodes**: Supported types include:
-  - ModelSamplingAuraFlow (Z-Image Turbo, NetaYume Lumina)
-  - ModelSamplingFlux (FLUX models)
-  - Standard samplers (KSampler)
+  - `ModelSamplingAuraFlow` (Z-Image Turbo, NetaYume Lumina)
+  - `ModelSamplingFlux` (FLUX models)
+  - Standard samplers (`KSampler`)

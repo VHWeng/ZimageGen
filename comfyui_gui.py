@@ -1710,6 +1710,18 @@ class WorkflowRunner(QThread):
                         inputs['batch_size'] = widgets[2] if len(widgets) > 2 else 1
                     elif node_type == 'CheckpointLoaderSimple' and widgets:
                         inputs['ckpt_name'] = widgets[0]
+                    elif node_type == 'UNETLoader' and widgets:
+                        inputs['unet_name'] = widgets[0]
+                        if len(widgets) > 1:
+                            inputs['weight_dtype'] = widgets[1]
+                    elif node_type == 'CLIPLoader' and widgets:
+                        inputs['clip_name'] = widgets[0]
+                        if len(widgets) > 1:
+                            inputs['type'] = widgets[1]
+                    elif node_type == 'VAELoader' and widgets:
+                        inputs['vae_name'] = widgets[0]
+                    elif node_type == 'FluxGuidance' and widgets:
+                        inputs['guidance'] = widgets[0]
                     elif node_type == 'SaveImage' and widgets:
                         inputs['filename_prefix'] = widgets[0] if widgets else "ComfyUI"
                     elif node_type == 'ModelSamplingAuraFlow' and widgets:
