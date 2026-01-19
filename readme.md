@@ -39,15 +39,22 @@ The GUI has been tested and verified to work with the following workflows:
 - **File**: `flux_quick.json`
 - **Note**: Negative prompts are ignored (CFG=1.0)
 
-### ✅ FLUX Klein Distilled
-- **Model**: flux2_klein_distilled_bf16.safetensors
-- **Steps**: 16
-- **Sampler**: dpmpp_2m_sde_gpu
-- **Scheduler**: karras
-- **CFG**: 1.0 (no negative prompt support)
-- **Features**: High-quality fast generation, distilled model
-- **Best for**: Very fast, high-quality results with the Flux architecture
-- **File**: `flux2_klein_distilled.json`
+### ✅ Flux2 Klein Distilled
+
+This workflow uses the Flux2 Klein distilled model, a compact yet powerful variant optimized for efficient image generation.
+
+* **File:** `flux2_klein_distilled.json`
+* **UNET Model:** `flux-2-klein-4b.safetensors`
+* **CLIP Model:** `qwen_3_4b.safetensors`
+* **VAE Model:** `flux2-vae.safetensors`
+* **Sampler:** `euler`
+* **Scheduler:** `simple`
+* **Steps:** 4
+* **CFG:** 1
+* **Guidance:** 3.5
+
+- **Features**: Compact yet powerful Flux2 Klein distilled model
+- **Best for**: Efficient image generation with balanced quality and speed
 - **Note**: Negative prompts are ignored (CFG=1.0)
 
 ### ✅ SDXL Turbo
@@ -219,7 +226,7 @@ ComfyUI/
 ├── models/
 │   ├── checkpoints/
 │   │   ├── flux1-schnell-fp8.safetensors
-│   │   ├── flux2_klein_distilled_bf16.safetensors
+│   │   ├── flux-2-klein-4b.safetensors
 │   │   ├── sd_xl_turbo_1.0_fp16.safetensors
 │   │   ├── juggernautXL_ragnarokBy.safetensors
 │   │   ├── Qwen-Rapid-AIO-SFW-v8.safetensors
@@ -229,7 +236,8 @@ ComfyUI/
 │   ├── diffusion_models/
 │   │   └── z_image_turbo_bf16.safetensors
 │   └── vae/
-│       └── ae.safetensors
+│       ├── ae.safetensors
+│       └── flux2-vae.safetensors
 ```
 
 ### Step 4: Setup Ollama (Optional)
