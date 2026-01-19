@@ -8,7 +8,7 @@ A powerful PyQt6-based graphical interface for ComfyUI's Z-Image Turbo workflow,
 
 - 🎨 **Simple Image Generation**: Generate images from text prompts with customizable sizes and aspect ratios
 - 🤖 **AI Prompt Generation**: Use Ollama LLMs to expand simple phrases into detailed image prompts
-- 🎭 **Style Selection**: Choose from 42+ preset styles or define custom styles for consistent aesthetics
+- 🎭 **Style Selection**: Choose from 44+ preset styles or define custom styles for consistent aesthetics
 - 🔄 **Re-generation**: Generate variations with different seeds while keeping the same prompt
 - 📊 **Batch Mode**: Process multiple images from CSV files with automated prompt generation
 - 💾 **Smart Auto-naming**: Automatically name saved images based on your concept phrases
@@ -440,8 +440,8 @@ The GUI includes 42+ preset styles organized into categories for consistent imag
 - Street Photography, Old Photograph (BW/Colorized)
 
 **Artistic & Painting:**
-- Oil Painting, Watercolor, Pencil Sketch (BW/Color)
-- Charcoal Drawing (BW/Color), Digital Painting
+- Oil Painting, Watercolor, Acrylic, Pencil Sketch (BW/Color)
+- Charcoal Drawing (BW/Color), Pen and Ink, Digital Painting
 - Surrealism, Impressionism
 
 **Graphic & Stylized:**
@@ -762,9 +762,9 @@ For issues or questions:
 
 ### Version 1.3.0
 - **Style Selection System**:
-  - 42+ preset styles organized in 5 categories
+  - 44+ preset styles organized in 5 categories
   - Photographic & Realistic (10 styles)
-  - Artistic & Painting (9 styles)
+  - Artistic & Painting (11 styles)
   - Graphic & Stylized (7 styles)
   - 3D & Rendering (5 styles)
   - Genre & Aesthetic (11 styles)
@@ -783,7 +783,14 @@ For issues or questions:
   - Clean visual hierarchy
   - Default: Photorealistic style
 
-### Version 1.4.0 (Latest)
+### Version 1.4.1
+- **Additional Artistic Styles**:
+  - Added "Acrylic" painting style to Artistic & Painting category
+  - Added "Pen and Ink" drawing style to Artistic & Painting category
+  - Updated style separator indices to maintain proper UI organization
+  - Style count increased from 42 to 44 total preset styles
+
+### Version 1.4.0
 - **Multilingual Support**:
   - Added language selection dropdown in batch mode (Greek default)
   - Language sent to AI for better prompt generation while keeping prompts in English

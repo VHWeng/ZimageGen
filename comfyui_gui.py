@@ -2030,10 +2030,12 @@ class ComfyUIGUI(QMainWindow):
             "─── Artistic & Painting ───",
             "Oil Painting",
             "Watercolor",
+            "Acrylic",
             "BW Pencil Sketch",
             "Color Pencil Sketch",
             "BW Charcoal Drawing",
             "Color Charcoal Drawing",
+            "Pen and Ink",
             "Digital Painting",
             "Surrealism",
             "Impressionism",
@@ -2067,7 +2069,7 @@ class ComfyUIGUI(QMainWindow):
         ]
         
         # Non-selectable separator indices
-        self.style_separators = {1, 12, 22, 31, 36}  # Indices of separator items
+        self.style_separators = {1, 12, 24, 33, 38}  # Indices of separator items
         
         # Image size presets
         self.size_presets = {
