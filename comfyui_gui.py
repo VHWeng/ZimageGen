@@ -289,62 +289,131 @@ class BatchPromptGenerator(QThread):
                 system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
 For each item in the JSON array, create:
 1. A detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
-2. The phonetic pronunciation using easy-to-read English phonetic respelling 
-3. IPA, phonetic pronunciation using IPA symbols
+2. The modern phonetic pronunciation in simple, readable English symbols. (include quick pronunciation tip).
+3. The modern pronunciation using accurate International Phonetic Alphabet (IPA) transcription.
 
-Keep each prompt under 200 words. Return ONLY a JSON array with the same structure, adding "prompt", "pronunciation", and "ipa" fields to each item."""
+CRITICAL INSTRUCTIONS:
+- Keep each prompt under 200 words
+- Return ONLY valid JSON array format
+- Each item MUST have exactly these fields: "id", "phrase", "prompt", "pronunciation", "ipa"
+- Do NOT include any explanatory text, markdown, or other formatting
+- Ensure all JSON syntax is correct (proper quotes, commas, brackets)
+- Example response format: [{{"id": 0, "phrase": "example", "prompt": "detailed prompt here", "pronunciation": "pronunciation here", "ipa": "IPA here"}}, ...]
+
+Return ONLY the JSON array with the same number of items as the input."""
 
                 user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
                 
-                try:
-                    response = requests.post(
-                        f"{self.ollama_url}/api/generate",
-                        json={
-                            "model": self.model,
-                            "prompt": f"{system_prompt}\n\n{user_prompt}",
-                            "stream": False,
-                            "format": "json"
-                        },
-                        timeout=300
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        generated_text = result.get('response', '').strip()
+                # Retry logic for better reliability
+                max_retries = 3
+                retry_delay = 2
+                response = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(
+                            f"{self.ollama_url}/api/generate",
+                            json={
+                                "model": self.model,
+                                "prompt": f"{system_prompt}\n\n{user_prompt}",
+                                "stream": False,
+                                "format": "json"
+                            },
+                            timeout=300
+                        )
                         
-                        # Parse JSON response
-                        try:
-                            prompts_data = json.loads(generated_text)
-                            
-                            # Handle both array and object responses
-                            if isinstance(prompts_data, dict) and 'prompts' in prompts_data:
+                        if response.status_code == 200:
+                            break  # Success, exit retry loop
+                        elif attempt < max_retries - 1:
+                            self.status.emit(f"Attempt {attempt + 1} failed, retrying in {retry_delay}s...")
+                            import time
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        
+                    except requests.exceptions.RequestException as req_err:
+                        if attempt < max_retries - 1:
+                            self.status.emit(f"Network error on attempt {attempt + 1}, retrying in {retry_delay}s...")
+                            import time
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                        else:
+                            raise req_err  # Re-raise on final attempt
+                
+                if response and response.status_code == 200:
+                    result = response.json()
+                    generated_text = result.get('response', '').strip()
+                    
+                    # Parse JSON response with enhanced error handling
+                    try:
+                        prompts_data = json.loads(generated_text)
+                        
+                        # Handle various response formats
+                        if isinstance(prompts_data, dict):
+                            if 'prompts' in prompts_data:
                                 prompts_data = prompts_data['prompts']
-                            
+                            elif 'items' in prompts_data:
+                                prompts_data = prompts_data['items']
+                            elif all(key in prompts_data for key in ['prompt', 'pronunciation', 'ipa']):
+                                # Single item response
+                                prompts_data = [prompts_data]
+                        
+                        # Validate and process results
+                        processed_count = 0
+                        if isinstance(prompts_data, list):
                             for item in prompts_data:
-                                # Extract prompt, pronunciation, and IPA
-                                prompt = item.get('prompt', '')
-                                pronunciation = item.get('pronunciation', '')
-                                ipa = item.get('ipa', '')
-                                # Store as tuple (prompt, pronunciation, ipa)
-                                results.append((prompt, pronunciation, ipa))
-                            
-                            self.progress.emit(len(results), total_items)
-                            
-                        except json.JSONDecodeError:
-                            # Fallback: treat as text and split
-                            self.error.emit(f"JSON parse error in batch {i//batch_size + 1}, using fallback")
-                            for _ in batch:
-                                # Return tuple format (prompt, pronunciation, ipa)
-                                results.append((generated_text[:500] if generated_text else "", "", ""))
-                    else:
-                        self.error.emit(f"Batch {i//batch_size + 1} failed: {response.status_code}")
-                        for _ in batch:
-                            results.append("")
-                            
-                except Exception as e:
-                    self.error.emit(f"Error in batch {i//batch_size + 1}: {str(e)}")
+                                if isinstance(item, dict):
+                                    # Extract prompt, pronunciation, and IPA
+                                    prompt = item.get('prompt', '').strip()
+                                    pronunciation = item.get('pronunciation', '').strip()
+                                    ipa = item.get('ipa', '').strip()
+                                    
+                                    # Validate that we got meaningful data
+                                    if prompt and len(prompt) > 5:
+                                        results.append((prompt, pronunciation, ipa))
+                                        processed_count += 1
+                                    else:
+                                        # Invalid item, use fallback
+                                        results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                                        processed_count += 1
+                                else:
+                                    # Non-dict item, use fallback
+                                    if processed_count < len(batch):
+                                        results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                                        processed_count += 1
+                        
+                        # Handle case where we didn't get enough results
+                        while processed_count < len(batch):
+                            results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                            processed_count += 1
+                        
+                        self.progress.emit(len(results), total_items)
+                        self.status.emit(f"✓ Batch {i//batch_size + 1} processed successfully ({processed_count} items)")
+                    
+                    except json.JSONDecodeError as je:
+                        # Enhanced fallback: try to extract structured data from text
+                        self.error.emit(f"JSON parse error in batch {i//batch_size + 1}: {str(je)[:50]}...")
+                        self.status.emit("Attempting enhanced text parsing fallback...")
+                        
+                        # Try to parse as structured text
+                        parsed_prompts = self._parse_structured_text(generated_text, len(batch))
+                        results.extend(parsed_prompts)
+                        
+                        self.progress.emit(len(results), total_items)
+                    
+                    except Exception as parse_error:
+                        # General parsing error fallback
+                        self.error.emit(f"Parsing error in batch {i//batch_size + 1}: {str(parse_error)[:50]}...")
+                        self.status.emit("Using basic prompt generation fallback...")
+                        
+                        # Generate basic prompts for remaining items
+                        for phrase, desc in batch:
+                            basic_prompt = self._generate_basic_prompt(f"{phrase}. {desc}".strip())
+                            results.append((basic_prompt, "", ""))
+                        
+                        self.progress.emit(len(results), total_items)
+                else:
+                    self.error.emit(f"Batch {i//batch_size + 1} failed: {response.status_code if response else 'No response'}")
                     for _ in batch:
-                        # Return tuple format (prompt, pronunciation, ipa)
                         results.append(("", "", ""))
             
             self.status.emit("✓ Batch prompt generation completed!")
@@ -354,6 +423,102 @@ Keep each prompt under 200 words. Return ONLY a JSON array with the same structu
             self.error.emit(f"Batch generation error: {str(e)}")
             # Return list of tuples (prompt, pronunciation, ipa)
             self.finished.emit([("", "", "") for _ in self.batch_data])
+    
+    def _generate_basic_prompt(self, phrase):
+        """Generate a basic prompt when JSON parsing fails"""
+        try:
+            # Build basic system prompt
+            style_instruction = ""
+            if self.style:
+                style_instruction = f"\nThe image should be in the style of: {self.style}"
+                style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+            
+            language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate the prompt in English."
+            
+            system_prompt = f"""You are an expert at creating detailed image generation prompts. 
+Given a simple word or phrase, expand it into a detailed, vivid prompt suitable for an AI image generator.
+Include details about: composition, lighting, mood, colors, and technical aspects.{style_instruction}{language_instruction}
+Keep the prompt under 200 words and make it descriptive and creative.
+Only return the image prompt, nothing else."""
+
+            user_prompt = f"Create a detailed image generation prompt based on this concept: {phrase}"
+            
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{system_prompt}\n\n{user_prompt}",
+                    "stream": False
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                prompt = result.get('response', '').strip()
+                if prompt and len(prompt) > 10:
+                    return prompt
+                else:
+                    return f"A detailed {self.style.lower() if self.style else ''} image of {phrase}"
+            else:
+                return f"A detailed {self.style.lower() if self.style else ''} image of {phrase}"
+                
+        except Exception:
+            return f"A detailed {self.style.lower() if self.style else ''} image of {phrase}"
+    
+    def _parse_structured_text(self, text, expected_count):
+        """Attempt to parse structured text response when JSON fails"""
+        results = []
+        
+        if not text:
+            # Return empty prompts if no text
+            return [("", "", "") for _ in range(expected_count)]
+        
+        try:
+            # Split by common separators
+            sections = []
+            if '\n\n' in text:
+                sections = [s.strip() for s in text.split('\n\n') if s.strip()]
+            elif '\n' in text:
+                sections = [s.strip() for s in text.split('\n') if s.strip()]
+            else:
+                sections = [text]
+            
+            # Try to extract structured information
+            for i, section in enumerate(sections[:expected_count]):
+                prompt = ""
+                pronunciation = ""
+                ipa = ""
+                
+                # Look for labeled sections
+                lines = section.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.lower().startswith(('prompt:', '1.', 'image:')):
+                        prompt = line.split(':', 1)[1].strip() if ':' in line else line
+                    elif line.lower().startswith(('pronunciation:', '2.', 'english:')):
+                        pronunciation = line.split(':', 1)[1].strip() if ':' in line else line
+                    elif line.lower().startswith(('ipa:', '3.', 'phonetic:')):
+                        ipa = line.split(':', 1)[1].strip() if ':' in line else line
+                    elif not prompt and len(line) > 20 and not line.startswith(('{', '[')):
+                        # Assume first substantial line is the prompt
+                        prompt = line
+                
+                # If we couldn't parse structured format, use the whole section as prompt
+                if not prompt:
+                    prompt = section[:200] if len(section) > 200 else section
+                
+                results.append((prompt, pronunciation, ipa))
+            
+            # Fill remaining slots if we didn't get enough
+            while len(results) < expected_count:
+                results.append(("", "", ""))
+                
+        except Exception:
+            # Ultimate fallback
+            results = [("", "", "") for _ in range(expected_count)]
+        
+        return results
 
 
 class BatchImageGenerator(QThread):
