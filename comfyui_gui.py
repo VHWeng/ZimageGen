@@ -249,13 +249,15 @@ class BatchPromptGenerator(QThread):
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)  # current, total
     
-    def __init__(self, batch_data, model, style="", language="Greek (el)", ollama_url="http://127.0.0.1:11434"):
+    def __init__(self, batch_data, model, style="", language="Greek (el)", ollama_url="http://127.0.0.1:11434", generation_type="full"):
         super().__init__()
         self.batch_data = batch_data  # List of (phrase, description) tuples
         self.model = model
         self.style = style
         self.language = language
         self.ollama_url = ollama_url
+        self.generation_type = generation_type  # "full", "pronunciation_only", or "description_only"
+        self._should_stop = False
     
     def run(self):
         """Generate prompts in batch using JSON mode"""
@@ -265,6 +267,11 @@ class BatchPromptGenerator(QThread):
             total_items = len(self.batch_data)
             
             for i in range(0, total_items, batch_size):
+                if self._should_stop:
+                    self.status.emit("Generation cancelled by user")
+                    self.finished.emit([])
+                    return
+                    
                 batch = self.batch_data[i:i+batch_size]
                 self.status.emit(f"Processing batch {i//batch_size + 1}...")
                 
@@ -276,17 +283,47 @@ class BatchPromptGenerator(QThread):
                         item["description"] = desc
                     items_json.append(item)
                 
-                # Build system prompt with style and language
-                style_instruction = ""
-                if self.style:
-                    style_instruction = f"\nAll prompts should be in the style of: {self.style}"
-                    style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
-                
-                # Extract language code from selection (e.g., "Greek (el)" -> "el")
-                lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
-                language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
-                
-                system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
+                # Build system prompt based on generation type
+                if self.generation_type == "pronunciation_only":
+                    system_prompt = f"""You are an expert at creating pronunciation guides.
+For each item in the JSON array, create:
+1. The modern phonetic pronunciation in simple, readable English symbols. (include quick pronunciation tip).
+2. The modern pronunciation using accurate International Phonetic Alphabet (IPA) transcription.
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY valid JSON array format
+- Each item MUST have exactly these fields: "id", "phrase", "pronunciation", "ipa"
+- Do NOT include any explanatory text, markdown, or other formatting
+- Understand the input in {self.language.split()[0]} and generate pronunciations accordingly"""
+                    user_prompt = f"Create pronunciation guides for these items:\n{json.dumps(items_json, indent=2)}"
+                elif self.generation_type == "description_only":
+                    style_instruction = ""
+                    if self.style:
+                        style_instruction = f"\nAll prompts should be in the style of: {self.style}"
+                        style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+                    
+                    language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
+                    
+                    system_prompt = f"""You are an expert at creating detailed image generation prompts.
+For each item in the JSON array, create a detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
+
+CRITICAL INSTRUCTIONS:
+- Keep each prompt under 200 words
+- Return ONLY valid JSON array format
+- Each item MUST have exactly these fields: "id", "phrase", "prompt"
+- Do NOT include any explanatory text, markdown, or other formatting"""
+                    user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
+                else:  # full generation
+                    style_instruction = ""
+                    if self.style:
+                        style_instruction = f"\nAll prompts should be in the style of: {self.style}"
+                        style_instruction += "\nIncorporate appropriate visual elements, techniques, and characteristics of this style."
+                    
+                    # Extract language code from selection (e.g., "Greek (el)" -> "el")
+                    lang_code = self.language.split("(")[-1].rstrip(")") if "(" in self.language else "en"
+                    language_instruction = f"\nUnderstand the input in {self.language.split()[0]} but generate prompts in English."
+                    
+                    system_prompt = f"""You are an expert at creating detailed image generation prompts and pronunciation guides.
 For each item in the JSON array, create:
 1. A detailed, vivid prompt suitable for an AI image generator (include: composition, lighting, mood, colors, technical aspects{style_instruction}{language_instruction})
 2. The modern phonetic pronunciation in simple, readable English symbols. (include quick pronunciation tip).
@@ -301,8 +338,7 @@ CRITICAL INSTRUCTIONS:
 - Example response format: [{{"id": 0, "phrase": "example", "prompt": "detailed prompt here", "pronunciation": "pronunciation here", "ipa": "IPA here"}}, ...]
 
 Return ONLY the JSON array with the same number of items as the input."""
-
-                user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
+                    user_prompt = f"Create detailed image generation prompts for these items:\n{json.dumps(items_json, indent=2)}"
                 
                 # Retry logic for better reliability
                 max_retries = 3
@@ -362,28 +398,54 @@ Return ONLY the JSON array with the same number of items as the input."""
                         if isinstance(prompts_data, list):
                             for item in prompts_data:
                                 if isinstance(item, dict):
-                                    # Extract prompt, pronunciation, and IPA
-                                    prompt = item.get('prompt', '').strip()
-                                    pronunciation = item.get('pronunciation', '').strip()
-                                    ipa = item.get('ipa', '').strip()
-                                    
-                                    # Validate that we got meaningful data
-                                    if prompt and len(prompt) > 5:
-                                        results.append((prompt, pronunciation, ipa))
-                                        processed_count += 1
+                                    if self.generation_type == "pronunciation_only":
+                                        # Extract only pronunciation and IPA for pronunciation_only mode
+                                        pronunciation = item.get('pronunciation', '').strip()
+                                        ipa = item.get('ipa', '').strip()
+                                        
+                                        # Validate that we got meaningful pronunciation data
+                                        if pronunciation and len(pronunciation) > 1:
+                                            results.append(("", pronunciation, ipa))
+                                            processed_count += 1
+                                        else:
+                                            # Invalid item, use fallback
+                                            phrase = batch[processed_count][0] if processed_count < len(batch) else ""
+                                            basic_pronunciation = self._generate_basic_pronunciation(phrase)
+                                            results.append(("", basic_pronunciation, ""))
+                                            processed_count += 1
                                     else:
-                                        # Invalid item, use fallback
-                                        results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
-                                        processed_count += 1
+                                        # Extract prompt, pronunciation, and IPA for full/description modes
+                                        prompt = item.get('prompt', '').strip()
+                                        pronunciation = item.get('pronunciation', '').strip()
+                                        ipa = item.get('ipa', '').strip()
+                                        
+                                        # Validate that we got meaningful data
+                                        if prompt and len(prompt) > 5:
+                                            results.append((prompt, pronunciation, ipa))
+                                            processed_count += 1
+                                        else:
+                                            # Invalid item, use fallback
+                                            results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                                            processed_count += 1
                                 else:
                                     # Non-dict item, use fallback
                                     if processed_count < len(batch):
-                                        results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                                        if self.generation_type == "pronunciation_only":
+                                            phrase = batch[processed_count][0]
+                                            basic_pronunciation = self._generate_basic_pronunciation(phrase)
+                                            results.append(("", basic_pronunciation, ""))
+                                        else:
+                                            results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
                                         processed_count += 1
                         
                         # Handle case where we didn't get enough results
                         while processed_count < len(batch):
-                            results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
+                            if self.generation_type == "pronunciation_only":
+                                phrase = batch[processed_count][0]
+                                basic_pronunciation = self._generate_basic_pronunciation(phrase)
+                                results.append(("", basic_pronunciation, ""))
+                            else:
+                                results.append((self._generate_basic_prompt(batch[processed_count][0]), "", ""))
                             processed_count += 1
                         
                         self.progress.emit(len(results), total_items)
@@ -401,14 +463,32 @@ Return ONLY the JSON array with the same number of items as the input."""
                         self.progress.emit(len(results), total_items)
                     
                     except Exception as parse_error:
+                        if self._should_stop:
+                            self.status.emit("Generation cancelled by user")
+                            self.finished.emit(results)
+                            return
+                        
                         # General parsing error fallback
                         self.error.emit(f"Parsing error in batch {i//batch_size + 1}: {str(parse_error)[:50]}...")
                         self.status.emit("Using basic prompt generation fallback...")
                         
                         # Generate basic prompts for remaining items
                         for phrase, desc in batch:
-                            basic_prompt = self._generate_basic_prompt(f"{phrase}. {desc}".strip())
-                            results.append((basic_prompt, "", ""))
+                            if self._should_stop:
+                                self.status.emit("Generation cancelled by user")
+                                self.finished.emit(results)
+                                return
+                            
+                            if self.generation_type == "pronunciation_only":
+                                # Generate basic pronunciation
+                                basic_pronunciation = self._generate_basic_pronunciation(phrase)
+                                results.append(("", basic_pronunciation, ""))
+                            elif self.generation_type == "description_only":
+                                basic_prompt = self._generate_basic_prompt(f"{phrase}. {desc}".strip())
+                                results.append((basic_prompt, "", ""))
+                            else:  # full
+                                basic_prompt = self._generate_basic_prompt(f"{phrase}. {desc}".strip())
+                                results.append((basic_prompt, "", ""))
                         
                         self.progress.emit(len(results), total_items)
                 else:
@@ -416,13 +496,20 @@ Return ONLY the JSON array with the same number of items as the input."""
                     for _ in batch:
                         results.append(("", "", ""))
             
-            self.status.emit("✓ Batch prompt generation completed!")
+            if not self._should_stop:
+                self.status.emit("✓ Batch prompt generation completed!")
             self.finished.emit(results)
             
         except Exception as e:
-            self.error.emit(f"Batch generation error: {str(e)}")
+            if not self._should_stop:
+                self.error.emit(f"Batch generation error: {str(e)}")
             # Return list of tuples (prompt, pronunciation, ipa)
             self.finished.emit([("", "", "") for _ in self.batch_data])
+    
+    def stop_generation(self):
+        """Request to stop the generation process"""
+        self._should_stop = True
+        self.status.emit("Cancelling generation...")
     
     def _generate_basic_prompt(self, phrase):
         """Generate a basic prompt when JSON parsing fails"""
@@ -519,6 +606,33 @@ Only return the image prompt, nothing else."""
             results = [("", "", "") for _ in range(expected_count)]
         
         return results
+    
+    def _generate_basic_pronunciation(self, phrase):
+        """Generate a basic pronunciation when JSON parsing fails"""
+        try:
+            system_prompt = f"""You are an expert at pronunciation guides.
+Provide the modern phonetic pronunciation in simple, readable English symbols for the given word or phrase.
+Only return the pronunciation, nothing else."""
+            
+            user_prompt = f"Provide pronunciation for: {phrase}"
+            
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{system_prompt}\n\n{user_prompt}",
+                    "stream": False
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('response', '').strip()
+            else:
+                return f"Pronunciation for: {phrase}"
+        except Exception:
+            return f"Pronunciation for: {phrase}"
 
 
 class BatchImageGenerator(QThread):
@@ -652,6 +766,7 @@ class BatchModeDialog(QDialog):
         self.batch_language_combo = QComboBox()
         self.batch_language_combo.addItems([
             "Greek (el)",
+            "Greek Polytonic (el-polyton)",
             "English (en)",
             "Spanish (es)",
             "French (fr)",
@@ -700,6 +815,20 @@ class BatchModeDialog(QDialog):
         self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
         self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
         file_layout.addWidget(self.gen_prompts_btn)
+        
+        # Add new buttons
+        self.gen_pronunciation_btn = QPushButton("🔤 Generate Pronunciation")
+        self.gen_pronunciation_btn.clicked.connect(self.generate_pronunciation_only)
+        file_layout.addWidget(self.gen_pronunciation_btn)
+        
+        self.gen_description_btn = QPushButton("📝 Generate Description")
+        self.gen_description_btn.clicked.connect(self.generate_description_only)
+        file_layout.addWidget(self.gen_description_btn)
+        
+        self.cancel_gen_btn = QPushButton("⏹ Cancel Generation")
+        self.cancel_gen_btn.clicked.connect(self.cancel_generation)
+        self.cancel_gen_btn.setEnabled(False)  # Disabled by default
+        file_layout.addWidget(self.cancel_gen_btn)
         
         file_layout.addStretch()
         layout.addLayout(file_layout)
@@ -1028,6 +1157,9 @@ class BatchModeDialog(QDialog):
         
         self.set_busy(True)
         self.gen_prompts_btn.setEnabled(False)
+        self.gen_pronunciation_btn.setEnabled(False)
+        self.gen_description_btn.setEnabled(False)
+        self.cancel_gen_btn.setEnabled(True)
         
         # Get selected language
         language = self.batch_language_combo.currentText()
@@ -1042,8 +1174,7 @@ class BatchModeDialog(QDialog):
     
     def on_batch_prompts_generated(self, prompt_data):
         """Handle batch prompt generation completion"""
-        self.gen_prompts_btn.setEnabled(True)
-        self.set_busy(False)
+        self._reset_generation_buttons()
         
         # Update table with generated prompts, pronunciations, and IPA
         generated_count = 0
@@ -1076,6 +1207,191 @@ class BatchModeDialog(QDialog):
                     generated_count += 1
         
         self.log_status(f"✓ Generated {generated_count} prompts and pronunciations")
+    
+    def generate_pronunciation_only(self):
+        """Generate pronunciation and IPA only for all rows"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Please load a file first!")
+            return
+        
+        if not self.parent_window:
+            QMessageBox.warning(self, "Error", "Parent window not available!")
+            return
+        
+        model = self.batch_ollama_combo.currentText()
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+            return
+        
+        # Collect batch data
+        batch_data = []
+        for row in range(self.table.rowCount()):
+            phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+            desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+            if phrase:
+                batch_data.append((phrase, desc))
+        
+        if not batch_data:
+            QMessageBox.warning(self, "No Data", "No phrases to process!")
+            return
+        
+        self.set_busy(True)
+        self.gen_pronunciation_btn.setEnabled(False)
+        self.gen_prompts_btn.setEnabled(False)
+        self.gen_description_btn.setEnabled(False)
+        self.cancel_gen_btn.setEnabled(True)
+        
+        # Get selected language
+        language = self.batch_language_combo.currentText()
+        
+        # Start batch pronunciation generation
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, "", language, generation_type="pronunciation_only")
+        self.batch_prompt_gen.status.connect(self.log_status)
+        self.batch_prompt_gen.error.connect(self.log_error)
+        self.batch_prompt_gen.progress.connect(self.update_progress)
+        self.batch_prompt_gen.finished.connect(self.on_batch_pronunciation_generated)
+        self.batch_prompt_gen.start()
+    
+    def on_batch_pronunciation_generated(self, prompt_data):
+        """Handle batch pronunciation generation completion"""
+        self._reset_generation_buttons()
+        
+        # Update table with generated pronunciations and IPA only
+        generated_count = 0
+        for row_idx, data in enumerate(prompt_data):
+            if row_idx < self.table.rowCount():
+                pronunciation = ""
+                ipa = ""
+                
+                # Handle different data formats
+                if isinstance(data, tuple):
+                    if len(data) == 3:
+                        # Format: (prompt, pronunciation, ipa) or ("", pronunciation, "")
+                        _, pronunciation, ipa = data
+                    elif len(data) == 2:
+                        # Format: (prompt, pronunciation) or ("", pronunciation)
+                        _, pronunciation = data
+                        ipa = ""
+                    else:
+                        # Unexpected tuple format
+                        pronunciation = ""
+                        ipa = ""
+                elif isinstance(data, str):
+                    # Legacy format - just pronunciation as string
+                    pronunciation = data
+                    ipa = ""
+                else:
+                    # Unknown format
+                    pronunciation = ""
+                    ipa = ""
+                
+                # Set Pronunciation (column 2) - always update, don't check if empty
+                self.table.setItem(row_idx, 2, QTableWidgetItem(pronunciation))
+                
+                # Set IPA (column 3) - always update, don't check if empty
+                self.table.setItem(row_idx, 3, QTableWidgetItem(ipa))
+                
+                if pronunciation or ipa:
+                    generated_count += 1
+        
+        self.log_status(f"✓ Generated {generated_count} pronunciations and IPA transcriptions")
+    
+    def generate_description_only(self):
+        """Generate image prompts only for all rows"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Please load a file first!")
+            return
+        
+        if not self.parent_window:
+            QMessageBox.warning(self, "Error", "Parent window not available!")
+            return
+        
+        model = self.batch_ollama_combo.currentText()
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+            return
+        
+        # Get style
+        style = self.batch_style_combo.currentText()
+        if style == "Custom":
+            style = self.batch_custom_style_input.text().strip()
+            if not style:
+                QMessageBox.warning(self, "No Style", "Please enter a custom style or select a preset!")
+                return
+        
+        # Collect batch data
+        batch_data = []
+        for row in range(self.table.rowCount()):
+            phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+            desc = self.table.item(row, 1).text() if self.table.item(row, 1) else ""
+            if phrase:
+                batch_data.append((phrase, desc))
+        
+        if not batch_data:
+            QMessageBox.warning(self, "No Data", "No phrases to process!")
+            return
+        
+        self.set_busy(True)
+        self.gen_description_btn.setEnabled(False)
+        self.gen_prompts_btn.setEnabled(False)
+        self.gen_pronunciation_btn.setEnabled(False)
+        self.cancel_gen_btn.setEnabled(True)
+        
+        # Get selected language
+        language = self.batch_language_combo.currentText()
+        
+        # Start batch description generation
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, style, language, generation_type="description_only")
+        self.batch_prompt_gen.status.connect(self.log_status)
+        self.batch_prompt_gen.error.connect(self.log_error)
+        self.batch_prompt_gen.progress.connect(self.update_progress)
+        self.batch_prompt_gen.finished.connect(self.on_batch_description_generated)
+        self.batch_prompt_gen.start()
+    
+    def on_batch_description_generated(self, prompt_data):
+        """Handle batch description generation completion"""
+        self._reset_generation_buttons()
+        
+        # Update table with generated prompts only
+        generated_count = 0
+        for row_idx, data in enumerate(prompt_data):
+            if row_idx < self.table.rowCount():
+                if isinstance(data, tuple) and len(data) == 3:
+                    prompt, _, _ = data  # Only use prompt for description only
+                elif isinstance(data, tuple) and len(data) == 2:
+                    # Handle legacy format (prompt, pronunciation)
+                    prompt, _ = data
+                else:
+                    # Handle legacy format (just prompt)
+                    prompt = data if isinstance(data, str) else ""
+                
+                # Set Image Prompt (column 4)
+                self.table.setItem(row_idx, 4, QTableWidgetItem(prompt))
+                
+                if prompt:
+                    generated_count += 1
+        
+        self.log_status(f"✓ Generated {generated_count} image descriptions")
+    
+    def cancel_generation(self):
+        """Cancel the current batch generation process"""
+        if hasattr(self, 'batch_prompt_gen') and self.batch_prompt_gen.isRunning():
+            self.log_status("Requesting cancellation...")
+            self.batch_prompt_gen.stop_generation()
+            # Disable cancel button immediately
+            self.cancel_gen_btn.setEnabled(False)
+        else:
+            self.log_status("No generation process to cancel")
+            # Ensure button is disabled even if no process is running
+            self.cancel_gen_btn.setEnabled(False)
+    
+    def _reset_generation_buttons(self):
+        """Reset all generation-related button states"""
+        self.gen_prompts_btn.setEnabled(True)
+        self.gen_pronunciation_btn.setEnabled(True)
+        self.gen_description_btn.setEnabled(True)
+        self.cancel_gen_btn.setEnabled(False)
+        self.set_busy(False)
     
     def regenerate_single_prompt(self, row):
             """Regenerate prompt for a single row"""
@@ -2309,6 +2625,7 @@ class ComfyUIGUI(QMainWindow):
         self.language_combo = QComboBox()
         self.language_combo.addItems([
             "Greek (el)",
+            "Greek Polytonic (el-polyton)",
             "English (en)",
             "Spanish (es)",
             "French (fr)",

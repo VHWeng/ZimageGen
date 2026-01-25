@@ -379,10 +379,13 @@ Process multiple images from a CSV file:
    - **Select style** (applies to all prompts in batch)
    - Review/edit the spreadsheet data
 
-4. **Generate prompts**
-   - Click "✨ Generate All Prompts" (next to style selection)
-   - Wait for AI to expand all phrases into detailed prompts with chosen style
-   - Prompts appear in the "Image Prompt" column
+4. **Generate content**
+   - **✨ Generate All Prompts**: Creates full prompts, pronunciations, and IPA for all rows
+   - **🔤 Generate Pronunciation**: Creates only pronunciations and IPA transcriptions
+   - **📝 Generate Description**: Creates only image prompts (no pronunciation)
+   - **⏹ Cancel Generation**: Stops any ongoing generation process
+   - Wait for AI to process your content
+   - Results appear in respective columns
 
 5. **Process batch**
    - Click "🎨 Process Batch (Generate Images)"
@@ -430,6 +433,8 @@ The app will automatically:
 - **Flexible Delimiters**: Pipe (default), Comma, Tab, or Semicolon
 - **Model Selection**: Choose Ollama model per batch
 - **Style Consistency**: Apply one style to all images in batch
+- **Selective Generation**: Generate full content, pronunciation only, or descriptions only
+- **Cancellation Support**: Stop generation processes mid-way
 - **Smart Saving**: 
   - CSV saves to `Output/` with original filename
   - Images save to `Output/Output/` folder
@@ -620,6 +625,8 @@ These are optimized for Z-Image Turbo and shouldn't need changes.
 - **Monitor progress**: Watch status box for errors during generation
 - **Save incrementally**: Save CSV after prompt generation, before image processing
 - **Zip for backup**: Use "Save All as Zip" for complete backup with images and data
+- **Selective Generation**: Use specific buttons to generate only what you need
+- **Cancellation**: Use "Cancel Generation" button to stop ongoing processes
 - Keep prompts under 300 words for best results
 - Use descriptive phrases in column 1 for better auto-naming
 
@@ -798,11 +805,32 @@ For issues or questions:
   - Updated style separator indices to maintain proper UI organization
   - Style count increased from 42 to 44 total preset styles
 
+### Version 1.4.2 (Latest)
+- **Batch Mode UI Improvements**:
+  - Simplified button labels: "🔤 Generate Pronunciation Only" → "🔤 Generate Pronunciation"
+  - Simplified button labels: "📝 Generate Description Only" → "📝 Generate Description"
+  - Maintained all functionality with clearer, more concise labels
+- **Enhanced Language Support**:
+  - Added "Greek Polytonic" language option for better classical Greek text processing
+  - Expanded multilingual capabilities for diverse linguistic needs
+- **Improved Button State Management**:
+  - Fixed "Cancel Generation" button activation issues
+  - Ensured consistent button enable/disable behavior across all generation modes
+  - Added centralized button state reset functionality
+- **Pronunciation Generation Fixes**:
+  - Resolved issues with "Generate Pronunciation" not updating word list
+  - Improved data format handling for pronunciation-only generation
+  - Enhanced fallback mechanisms for pronunciation generation
+- **UI Consistency**:
+  - Synchronized button states across all generation completion handlers
+  - Improved error handling and user feedback
+  - Better visual feedback during generation processes
+
 ### Version 1.4.0
 - **Multilingual Support**:
   - Added language selection dropdown in batch mode (Greek default)
   - Language sent to AI for better prompt generation while keeping prompts in English
-  - Available languages: Greek, English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean
+  - **Available languages**: Greek, Greek Polytonic, English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean
 - **Pronunciation Features**:
   - Added Pronunciation column (column 3) with English phonetic spelling
   - Added IPA column (column 4) with International Phonetic Alphabet symbols
