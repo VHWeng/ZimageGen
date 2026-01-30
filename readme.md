@@ -97,6 +97,21 @@ This workflow uses the Flux2 Klein distilled model, a compact yet powerful varia
 - **Note**: Requires simplified workflow without subgraphs
 - **Model Link**: [Download from HuggingFace](https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/main/NetaYumev35_pretrained_all_in_one.safetensors)
 
+### ✅ Z-Image Base16
+- **Model**: z_image_bf16.safetensors
+- **Steps**: 25
+- **Sampler**: res_multistep
+- **Scheduler**: simple
+- **CFG**: 4.0
+- **Features**: Z-Image base model with 16-bit precision, ModelSamplingAuraFlow
+- **Best for**: High-quality general purpose image generation
+- **File**: `image_z_base16.json`
+- **Note**: Uses lumina2 CLIP type, requires ae.safetensors VAE
+- **Model Links**:
+  - [z_image_bf16.safetensors](https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors)
+  - [qwen_3_4b.safetensors](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors)
+  - [ae.safetensors](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors)
+
 ## Workflow Compatibility
 
 The GUI intelligently handles different workflow formats:
@@ -808,6 +823,11 @@ For issues or questions:
   - Style count increased from 42 to 44 total preset styles
 
 ### Version 1.4.3 (Latest)
+- **New Workflow Support**:
+  - Added Z-Image Base16 workflow (`image_z_base16.json`)
+  - Supports z_image_bf16.safetensors model with lumina2 CLIP type
+  - Configured for 25 steps with res_multistep sampler
+  - Compatible with ae.safetensors VAE
 - **Batch Mode UI Refinements**:
   - Renamed column 2 from "Description" to "Translation" for better semantic clarity
   - Simplified button labels for conciseness:
