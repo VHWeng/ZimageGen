@@ -284,7 +284,18 @@ class BatchPromptGenerator(QThread):
                     items_json.append(item)
                 
                 # Build system prompt based on generation type
-                if self.generation_type == "pronunciation_only":
+                if self.generation_type == "translation_only":
+                    system_prompt = f"""You are an expert translator who creates accurate, natural translations.
+For each item in the JSON array, create:
+1. A fluent, natural translation of the phrase into English.
+
+CRITICAL INSTRUCTIONS:
+- Return ONLY valid JSON array format
+- Each item MUST have exactly these fields: "id", "phrase", "translation"
+- Do NOT include any explanatory text, markdown, or other formatting
+- Translate from {self.language.split()[0]} to English while preserving meaning and natural flow"""
+                    user_prompt = f"Create translations for these items:\n{json.dumps(items_json, indent=2)}"
+                elif self.generation_type == "pronunciation_only":
                     system_prompt = f"""You are an expert at creating pronunciation guides.
 For each item in the JSON array, create:
 1. The modern phonetic pronunciation in simple, readable English symbols. (include quick pronunciation tip).
@@ -398,7 +409,21 @@ Return ONLY the JSON array with the same number of items as the input."""
                         if isinstance(prompts_data, list):
                             for item in prompts_data:
                                 if isinstance(item, dict):
-                                    if self.generation_type == "pronunciation_only":
+                                    if self.generation_type == "translation_only":
+                                        # Extract only translation for translation_only mode
+                                        translation = item.get('translation', '').strip()
+                                        
+                                        # Validate that we got meaningful translation data
+                                        if translation and len(translation) > 1:
+                                            results.append((translation, "", ""))
+                                            processed_count += 1
+                                        else:
+                                            # Invalid item, use fallback
+                                            phrase = batch[processed_count][0] if processed_count < len(batch) else ""
+                                            basic_translation = self._generate_basic_translation(phrase)
+                                            results.append((basic_translation, "", ""))
+                                            processed_count += 1
+                                    elif self.generation_type == "pronunciation_only":
                                         # Extract only pronunciation and IPA for pronunciation_only mode
                                         pronunciation = item.get('pronunciation', '').strip()
                                         ipa = item.get('ipa', '').strip()
@@ -430,7 +455,11 @@ Return ONLY the JSON array with the same number of items as the input."""
                                 else:
                                     # Non-dict item, use fallback
                                     if processed_count < len(batch):
-                                        if self.generation_type == "pronunciation_only":
+                                        if self.generation_type == "translation_only":
+                                            phrase = batch[processed_count][0]
+                                            basic_translation = self._generate_basic_translation(phrase)
+                                            results.append((basic_translation, "", ""))
+                                        elif self.generation_type == "pronunciation_only":
                                             phrase = batch[processed_count][0]
                                             basic_pronunciation = self._generate_basic_pronunciation(phrase)
                                             results.append(("", basic_pronunciation, ""))
@@ -479,7 +508,11 @@ Return ONLY the JSON array with the same number of items as the input."""
                                 self.finished.emit(results)
                                 return
                             
-                            if self.generation_type == "pronunciation_only":
+                            if self.generation_type == "translation_only":
+                                # Generate basic translation
+                                basic_translation = self._generate_basic_translation(phrase)
+                                results.append((basic_translation, "", ""))
+                            elif self.generation_type == "pronunciation_only":
                                 # Generate basic pronunciation
                                 basic_pronunciation = self._generate_basic_pronunciation(phrase)
                                 results.append(("", basic_pronunciation, ""))
@@ -633,6 +666,33 @@ Only return the pronunciation, nothing else."""
                 return f"Pronunciation for: {phrase}"
         except Exception:
             return f"Pronunciation for: {phrase}"
+    
+    def _generate_basic_translation(self, phrase):
+        """Generate a basic translation when JSON parsing fails"""
+        try:
+            system_prompt = f"""You are an expert translator.
+Translate the given phrase from {self.language.split()[0]} to fluent, natural English.
+Only return the translation, nothing else."""
+            
+            user_prompt = f"Translate to English: {phrase}"
+            
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": f"{system_prompt}\n\n{user_prompt}",
+                    "stream": False
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('response', '').strip()
+            else:
+                return f"Translation of: {phrase}"
+        except Exception:
+            return f"Translation of: {phrase}"
 
 
 class BatchImageGenerator(QThread):
@@ -815,6 +875,11 @@ class BatchModeDialog(QDialog):
         self.gen_prompts_btn = QPushButton("✨ Generate All")
         self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
         file_layout.addWidget(self.gen_prompts_btn)
+        
+        # Add new translation button
+        self.gen_translation_btn = QPushButton("🌐 Gen Translation")
+        self.gen_translation_btn.clicked.connect(self.generate_translation_only)
+        file_layout.addWidget(self.gen_translation_btn)
         
         # Add new buttons
         self.gen_pronunciation_btn = QPushButton("🔤 Gen Pronunciation")
@@ -1296,6 +1361,86 @@ class BatchModeDialog(QDialog):
         
         self.log_status(f"✓ Generated {generated_count} pronunciations and IPA transcriptions")
     
+    def generate_translation_only(self):
+        """Generate translations only for all rows"""
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Please load a file first!")
+            return
+        
+        if not self.parent_window:
+            QMessageBox.warning(self, "Error", "Parent window not available!")
+            return
+        
+        model = self.batch_ollama_combo.currentText()
+        if model in ["(No models available)", "(Ollama not running)"]:
+            QMessageBox.warning(self, "No Model", "Please select a valid Ollama model!")
+            return
+        
+        # Collect batch data - only process rows where translation column is empty
+        batch_data = []
+        for row in range(self.table.rowCount()):
+            phrase = self.table.item(row, 0).text() if self.table.item(row, 0) else ""
+            translation_item = self.table.item(row, 1)
+            translation = translation_item.text().strip() if translation_item else ""
+            
+            # Only add to batch if translation is empty
+            if phrase and not translation:
+                batch_data.append((phrase, ""))
+        
+        if not batch_data:
+            QMessageBox.information(self, "No Action Needed", "All translations are already filled. No empty translation cells found!")
+            return
+        
+        self.set_busy(True)
+        self.gen_translation_btn.setEnabled(False)
+        self.gen_prompts_btn.setEnabled(False)
+        self.gen_pronunciation_btn.setEnabled(False)
+        self.gen_description_btn.setEnabled(False)
+        self.cancel_gen_btn.setEnabled(True)
+        
+        # Get selected language
+        language = self.batch_language_combo.currentText()
+        
+        # Start batch translation generation
+        self.batch_prompt_gen = BatchPromptGenerator(batch_data, model, "", language, generation_type="translation_only")
+        self.batch_prompt_gen.status.connect(self.log_status)
+        self.batch_prompt_gen.error.connect(self.log_error)
+        self.batch_prompt_gen.progress.connect(self.update_progress)
+        self.batch_prompt_gen.finished.connect(self.on_batch_translation_generated)
+        self.batch_prompt_gen.start()
+    
+    def on_batch_translation_generated(self, translation_data):
+        """Handle batch translation generation completion"""
+        self._reset_generation_buttons()
+        
+        # Update table with generated translations only
+        generated_count = 0
+        data_index = 0
+        
+        for row_idx in range(self.table.rowCount()):
+            # Check if this row needs translation (empty translation column)
+            translation_item = self.table.item(row_idx, 1)
+            current_translation = translation_item.text().strip() if translation_item else ""
+            
+            if not current_translation and data_index < len(translation_data):
+                data = translation_data[data_index]
+                data_index += 1
+                
+                if isinstance(data, tuple) and len(data) >= 1:
+                    translation = data[0]  # First element is translation
+                elif isinstance(data, str):
+                    translation = data
+                else:
+                    translation = ""
+                
+                # Set Translation (column 1)
+                self.table.setItem(row_idx, 1, QTableWidgetItem(translation))
+                
+                if translation:
+                    generated_count += 1
+        
+        self.log_status(f"✓ Generated {generated_count} translations")
+    
     def generate_description_only(self):
         """Generate image prompts only for all rows"""
         if self.table.rowCount() == 0:
@@ -1388,6 +1533,7 @@ class BatchModeDialog(QDialog):
     def _reset_generation_buttons(self):
         """Reset all generation-related button states"""
         self.gen_prompts_btn.setEnabled(True)
+        self.gen_translation_btn.setEnabled(True)
         self.gen_pronunciation_btn.setEnabled(True)
         self.gen_description_btn.setEnabled(True)
         self.cancel_gen_btn.setEnabled(False)

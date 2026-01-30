@@ -396,6 +396,7 @@ Process multiple images from a CSV file:
 
 4. **Generate content**
    - **✨ Generate All**: Creates full prompts, pronunciations, and IPA for all rows
+   - **🌐 Gen Translation**: Creates only translations (fills empty translation cells)
    - **🔤 Gen Pronunciation**: Creates only pronunciations and IPA transcriptions
    - **📝 Gen Image Prompt**: Creates only image prompts (no pronunciation)
    - **⏹ Cancel Generation**: Stops any ongoing generation process
@@ -828,6 +829,10 @@ For issues or questions:
   - Supports z_image_bf16.safetensors model with lumina2 CLIP type
   - Configured for 25 steps with res_multistep sampler
   - Compatible with ae.safetensors VAE
+- **Batch Mode Enhancement**:
+  - Added **🌐 Gen Translation** button to generate translations for empty cells only
+  - Smart translation generation that preserves existing translations
+  - Translation column now properly named instead of "Description"
 - **Batch Mode UI Refinements**:
   - Renamed column 2 from "Description" to "Translation" for better semantic clarity
   - Simplified button labels for conciseness:
