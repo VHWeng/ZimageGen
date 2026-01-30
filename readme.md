@@ -380,9 +380,9 @@ Process multiple images from a CSV file:
    - Review/edit the spreadsheet data
 
 4. **Generate content**
-   - **✨ Generate All Prompts**: Creates full prompts, pronunciations, and IPA for all rows
-   - **🔤 Generate Pronunciation**: Creates only pronunciations and IPA transcriptions
-   - **📝 Generate Description**: Creates only image prompts (no pronunciation)
+   - **✨ Generate All**: Creates full prompts, pronunciations, and IPA for all rows
+   - **🔤 Gen Pronunciation**: Creates only pronunciations and IPA transcriptions
+   - **📝 Gen Image Prompt**: Creates only image prompts (no pronunciation)
    - **⏹ Cancel Generation**: Stops any ongoing generation process
    - Wait for AI to process your content
    - Results appear in respective columns
@@ -402,9 +402,11 @@ Process multiple images from a CSV file:
 
 Your CSV file should have these columns:
 
+**Note**: Column 2 was renamed from "Description" to "Translation" for better semantic clarity.
+
 | Column 1 | Column 2 | Column 3 | Column 4 | Column 5 | Column 6 |
 |----------|----------|----------|----------|----------|----------|
-| Phrase/Word | Description (optional) | Pronunciation (auto-generated) | IPA (auto-generated) | Image Prompt (auto-filled) | Filename (auto-filled) |
+| Phrase/Word | Translation (optional) | Pronunciation (auto-generated) | IPA (auto-generated) | Image Prompt (auto-filled) | Filename (auto-filled) |
 
 **Example with Pipe delimiter (|):**
 ```
@@ -805,11 +807,14 @@ For issues or questions:
   - Updated style separator indices to maintain proper UI organization
   - Style count increased from 42 to 44 total preset styles
 
-### Version 1.4.2 (Latest)
-- **Batch Mode UI Improvements**:
-  - Simplified button labels: "🔤 Generate Pronunciation Only" → "🔤 Generate Pronunciation"
-  - Simplified button labels: "📝 Generate Description Only" → "📝 Generate Description"
-  - Maintained all functionality with clearer, more concise labels
+### Version 1.4.3 (Latest)
+- **Batch Mode UI Refinements**:
+  - Renamed column 2 from "Description" to "Translation" for better semantic clarity
+  - Simplified button labels for conciseness:
+    - "✨ Generate All Prompts" → "✨ Generate All"
+    - "🔤 Gen Pronunciation" (formerly "Generate Pronunciation")
+    - "📝 Gen Image Prompt" (formerly "Generate Description")
+  - All functionality preserved with more intuitive naming
 - **Enhanced Language Support**:
   - Added "Greek Polytonic" language option for better classical Greek text processing
   - Expanded multilingual capabilities for diverse linguistic needs

@@ -812,16 +812,16 @@ class BatchModeDialog(QDialog):
         self.batch_custom_style_input.setEnabled(False)
         file_layout.addWidget(self.batch_custom_style_input)
         
-        self.gen_prompts_btn = QPushButton("✨ Generate All Prompts")
+        self.gen_prompts_btn = QPushButton("✨ Generate All")
         self.gen_prompts_btn.clicked.connect(self.generate_all_prompts)
         file_layout.addWidget(self.gen_prompts_btn)
         
         # Add new buttons
-        self.gen_pronunciation_btn = QPushButton("🔤 Generate Pronunciation")
+        self.gen_pronunciation_btn = QPushButton("🔤 Gen Pronunciation")
         self.gen_pronunciation_btn.clicked.connect(self.generate_pronunciation_only)
         file_layout.addWidget(self.gen_pronunciation_btn)
         
-        self.gen_description_btn = QPushButton("📝 Generate Description")
+        self.gen_description_btn = QPushButton("📝 Gen Image Prompt")
         self.gen_description_btn.clicked.connect(self.generate_description_only)
         file_layout.addWidget(self.gen_description_btn)
         
@@ -868,7 +868,7 @@ class BatchModeDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "Phrase/Word", "Description", "Pronunciation", "IPA", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
+            "Phrase/Word", "Translation", "Pronunciation", "IPA", "Image Prompt", "Filename", "Regen Prompt", "Regen Image"
         ])
         self.table.horizontalHeader().setStretchLastSection(False)
         # Set all columns to Interactive first
